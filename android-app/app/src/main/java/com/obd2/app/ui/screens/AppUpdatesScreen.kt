@@ -126,7 +126,7 @@ fun AppUpdatesScreen(vm: ObdViewModel) {
                     )
                     if (!vm.canRequestPackageInstalls()) {
                         Text(
-                            "Android требует разрешить установку приложений из этого источника для OBD2.",
+                            "Android требует разрешить установку приложений из этого источника для Wildia.",
                             color = Amber,
                             style = MaterialTheme.typography.bodySmall,
                         )

@@ -167,7 +167,7 @@ fun ObdAppRoot(vm: ObdViewModel = viewModel()) {
         android.util.Log.i("OBD2", "app.startup.first_frame_ms=${dt}ms (wide=$isWideScreen)")
     }
 
-    val title = Screen.byRoute(current)?.title ?: "OBD2 Сканер"
+    val title = Screen.byRoute(current)?.title ?: "Wildia"
     val drawerScreens = remember { Screen.all.distinctBy { it.route } }
 
     ModalNavigationDrawer(
@@ -180,7 +180,7 @@ fun ObdAppRoot(vm: ObdViewModel = viewModel()) {
                         .padding(16.dp),
                 ) {
                     Text(
-                        "OBD2 Сканер",
+                        "Wildia",
                         style = MaterialTheme.typography.titleLarge,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 12.dp),
                     )

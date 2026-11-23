@@ -43,8 +43,8 @@ android {
         applicationId = "com.obd2.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 15
-        versionName = "0.5.5"
+        versionCode = 16
+        versionName = "0.5.6"
         buildConfigField("String", "APK_UPDATE_MANIFEST_URL", "\"\"")
         buildConfigField("String", "DB_UPDATE_MANIFEST_URL", "\"\"")
         buildConfigField("String", "UPDATE_GITHUB_REPO", "\"$githubRepoProp\"")

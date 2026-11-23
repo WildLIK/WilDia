@@ -265,4 +265,114 @@ class ReleaseReadinessAuditTest {
             assertFalse(transport.isConnected())
         }
     }
+
+    // ------------------------------------------------------------------
+    // 3. v0.5.5 (15) -> v0.5.6 (16) upgrade flow & install intent
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `v055 to v056 GitHub Releases upgrade checks versionCode, SHA-256, downgrade protection, and install intent`() {
+        val apkBytes = "fake-release-v056-payload".toByteArray()
+        val goodSha = sha256(apkBytes)
+        lateinit var server: MiniHttpServer
+        server = MiniHttpServer { path, _ ->
+            when (path) {
+                "/latest" -> {
+                    val json = """
+                        {
+                          "tag_name": "v0.5.6",
+                          "draft": false,
+                          "prerelease": false,
+                          "published_at": "2026-11-23T18:00:00Z",
+                          "body": "Wildia v0.5.6",
+                          "assets": [
+                            {
+                              "name": "release-manifest.json",
+                              "size": 256,
+                              "browser_download_url": "${server.baseUrl}/release-manifest.json"
+                            }
+                          ]
+                        }
+                    """.trimIndent().toByteArray(Charsets.UTF_8)
+                    Triple(200, "application/json", json)
+                }
+                "/release-manifest.json" -> {
+                    val manifest = """
+                        {
+                          "versionCode": 16,
+                          "versionName": "0.5.6",
+                          "changelog": "Wildia branding & adaptive icons",
+                          "apkUrl": "${server.baseUrl}/obd2-v0.5.6-release.apk",
+                          "sizeBytes": ${apkBytes.size},
+                          "sha256": "$goodSha",
+                          "minAndroidSdk": 26
+                        }
+                    """.trimIndent().toByteArray(Charsets.UTF_8)
+                    Triple(200, "application/json", manifest)
+                }
+                else -> Triple(200, "application/vnd.android.package-archive", apkBytes)
+            }
+        }
+
+        server.use {
+            val mgr = ApkUpdateManager(ctx(), allowHttpForTest = true)
+
+            // 1. From v0.5.5 (15) -> detects v0.5.6 (16)
+            val check = mgr.checkForUpdate(
+                manifestUrl = "${server.baseUrl}/latest",
+                currentVersionCode = 15,
+                currentVersionName = "0.5.5",
+            )
+            assertTrue(check is ApkCheckResult.UpdateAvailable)
+            val m = (check as ApkCheckResult.UpdateAvailable).manifest
+            assertEquals(16, m.versionCode)
+            assertEquals("0.5.6", m.versionName)
+
+            // 2. Already on v0.5.6 (16) -> UpToDate, and downgrade (15 <= 16) is rejected
+            assertTrue(
+                mgr.checkForUpdate(
+                    manifestUrl = "${server.baseUrl}/latest",
+                    currentVersionCode = 16,
+                    currentVersionName = "0.5.6",
+                ) is ApkCheckResult.UpToDate,
+            )
+            val downgrade = mgr.downloadAndVerify(
+                manifest = m.copy(versionCode = 15, versionName = "0.5.5"),
+                wifiOnly = false,
+                currentVersionCode = 16,
+            )
+            assertTrue(downgrade is ApkVerificationResult.Rejected)
+
+            // 3. Corrupted SHA-256 is rejected
+            val badShaRes = mgr.downloadAndVerify(
+                manifest = m.copy(sha256 = "0".repeat(64)),
+                wifiOnly = false,
+                currentVersionCode = 15,
+            )
+            assertTrue(badShaRes is ApkVerificationResult.Rejected)
+
+            // 4. Install intent uses FileProvider & ACTION_VIEW
+            val fakeApk = File(ctx().filesDir, "apk_updates/obd2-v0.5.6-release.apk").apply {
+                parentFile?.mkdirs()
+                writeBytes(apkBytes)
+            }
+            fun clearFileProviderCache() {
+                runCatching {
+                    val f = androidx.core.content.FileProvider::class.java.getDeclaredField("sCache")
+                    f.isAccessible = true
+                    (f.get(null) as? MutableMap<*, *>)?.clear()
+                }
+            }
+            clearFileProviderCache()
+            try {
+                val intent = mgr.buildInstallIntent(fakeApk)
+                assertEquals(android.content.Intent.ACTION_VIEW, intent.action)
+                assertEquals("application/vnd.android.package-archive", intent.type)
+                assertTrue((intent.flags and android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) != 0)
+            } finally {
+                fakeApk.delete()
+                clearFileProviderCache()
+            }
+        }
+    }
 }
