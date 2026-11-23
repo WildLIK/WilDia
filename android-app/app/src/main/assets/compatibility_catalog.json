@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "catalogVersion": "2026.11.1",
+  "releasedAt": "2026-11-22",
+  "vehicles": [
+    {
+      "id": "vag_octavia_a5_bse",
+      "manufacturer": "VAG",
+      "brand": "Škoda",
+      "model": "Octavia A5 (1Z)",
+      "years": "2004-2013",
+      "engine": "1.6 MPI (BSE / BSF)",
+      "wmiPrefixes": ["TMB"],
+      "calIdPrefixes": ["06A906033"],
+      "ecuNameKeywords": ["SIMOS7", "SIMOS 7.1", "06A906033"],
+      "protocols": ["ISO 15765-4 CAN (11 bit, 500 kbaud)", "VAG TP 2.0 (CAN)", "KWP2000"],
+      "notes": "ЭБУ двигателя Simos 7.1, шлюз J533 7N0/1K0, стандартный OBD2 работает по ISO 15765-4."
+    },
+    {
+      "id": "ford_explorer_2004",
+      "manufacturer": "Ford",
+      "brand": "Ford",
+      "model": "Explorer (3 поколение)",
+      "years": "2002-2005",
+      "engine": "4.0 SOHC / 4.6 V8",
+      "wmiPrefixes": ["1FM"],
+      "calIdPrefixes": ["4L2A", "3L2A"],
+      "ecuNameKeywords": ["PCM", "EEC-V", "EEC-VI"],
+      "protocols": ["SAE J1850 PWM", "ISO 15765-4 CAN (11 bit, 500 kbaud)"],
+      "notes": "На ранних моделях 2004 года возможен J1850 PWM (41.6 кбод) или CAN; расширенные блоки (ABS/RCM) часто используют MS-CAN или J1850."
+    },
+    {
+      "id": "nissan_datsun_ondo_2015",
+      "manufacturer": "Nissan / Datsun",
+      "brand": "Datsun",
+      "model": "on-DO",
+      "years": "2014-2020",
+      "engine": "1.6 (8V / 16V ВАЗ-11186 / 21127)",
+      "wmiPrefixes": ["Z8N"],
+      "calIdPrefixes": ["I445", "I484", "11186"],
+      "ecuNameKeywords": ["M74", "EMS3120", "ECM"],
+      "protocols": ["ISO 15765-4 CAN (11 bit, 500 kbaud)", "ISO 14230-4 KWP"],
+      "notes": "Платформа ВАЗ-2190 / Granta с CAN/KWP ЭБУ двигателя; подушки/ABS/ЭУР имеют отдельные диагностические адреса."
+    },
+    {
+      "id": "haval_h3_2013",
+      "manufacturer": "Haval / Great Wall",
+      "brand": "Great Wall / Haval",
+      "model": "Hover H3",
+      "years": "2010-2016",
+      "engine": "2.0 (4G63S4M) / 2.0T",
+      "wmiPrefixes": ["LGW", "Z8P"],
+      "calIdPrefixes": ["SMW", "3612100", "DELPHI"],
+      "ecuNameKeywords": ["MT20U", "MT22U", "DELPHI", "BOSCH"],
+      "protocols": ["ISO 14230-4 KWP", "ISO 15765-4 CAN (11 bit, 500 kbaud)"],
+      "notes": "В зависимости от года и сборки используется KWP2000 (K-Line) или CAN; ЭБУ Delphi MT20U2 / MT22U / Bosch."
+    }
+  ],
+  "wmiBrands": {
+    "TMB": ["VAG", "Škoda"],
+    "WVW": ["VAG", "Volkswagen"],
+    "WAU": ["VAG", "Audi"],
+    "VSS": ["VAG", "SEAT"],
+    "XW8": ["VAG", "Volkswagen / Škoda (РФ)"],
+    "1FA": ["Ford", "Ford"],
+    "1FB": ["Ford", "Ford"],
+    "1FM": ["Ford", "Ford"],
+    "1FT": ["Ford", "Ford"],
+    "WF0": ["Ford", "Ford Europe"],
+    "Z6F": ["Ford", "Ford (РФ)"],
+    "JN1": ["Nissan / Datsun", "Nissan"],
+    "SJN": ["Nissan / Datsun", "Nissan UK"],
+    "Z8N": ["Nissan / Datsun", "Nissan / Datsun (РФ)"],
+    "LGW": ["Haval / Great Wall", "Great Wall / Haval"],
+    "Z8P": ["Haval / Great Wall", "Haval (РФ)"],
+    "XTA": ["Other", "LADA / АвтоВАЗ"],
+    "JT2": ["Other", "Toyota"],
+    "JHM": ["Other", "Honda"],
+    "KMH": ["Other", "Hyundai"],
+    "KNA": ["Other", "Kia"],
+    "Z94": ["Other", "Hyundai / Kia (РФ)"]
+  }
+}

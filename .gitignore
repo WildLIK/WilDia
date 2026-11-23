@@ -1,0 +1,56 @@
+# Gradle
+.gradle/
+build/
+*/build/
+!gradle/wrapper/gradle-wrapper.jar
+android-app/build/tmp-test/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Local config & secrets
+local.properties
+keystore.properties
+.env
+.env.*
+*.keystore
+*.jks
+*.p12
+*.pfx
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data source clones (can be re-cloned by scripts)
+tools/data/obdex/
+tools/data/SAEJ1979/
+tools/data/python-OBD/
+tools/data/dtc-database/
+tools/import_report.md
+
+# Build outputs & third-party APKs
+*.apk
+*.aab
+*.apk.idsig
+
+# Keep only README.md in repository root
+/*.md
+!README.md
+
+# Local archives, captures, headunit tools & backups (excluded from public repo)
+local_archive/
+captures/
+build_diag/
+backups/
+headunit_tools/
+collect_headunit_diagnostics.ps1
+*.etl
+*.log
+*.tmp

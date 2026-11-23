@@ -1,0 +1,277 @@
+# Vehicle / ECU profile data imported by tools/build_db.py.
+#
+# Confidence values:
+#   user_scan   — provided by the vehicle owner from a real VCDS scan (2026-11-20)
+#   likely      — widely published public fact, not verified against official docs here
+#   unverified  — placeholder / unknown
+#
+# Nothing here is guessed: absent characteristics stay absent ("Не определено"
+# in the UI). No CAN identifiers are invented: diag_address stays NULL unless
+# it is a public standard fact (functional tester address 0x7DF is standard).
+
+data_sources:
+  - id: vcds-scan-user
+    name: Скан VCDS владельца (Skoda Octavia A5 2012, BSE)
+    license: Данные, предоставленные владельцем автомобиля
+    url: ""
+    revision: "2026-11-20"
+    notes: Парт-номера ЭБУ и конфигурация из скана VCDS, предоставленного владельцем.
+  - id: public-standards
+    name: Публичные сведения о стандартах (SAE J1979, ISO 14229, ISO 15765-4)
+    license: Общеизвестные факты о стандартах (краткое изложение)
+    url: https://www.sae.org/standards/
+    notes: Только общеизвестные факты стандартов; тексты стандартов не включаются.
+  - id: public-catalogs
+    name: Публичные каталоги и энциклопедии (характеристики, семейства контроллеров)
+    license: Общеизвестные автомобильные факты (краткое изложение)
+    url: ""
+    notes: Семейства контроллеров и характеристики двигателей, широко опубликованные в открытых источниках; прямое копирование текстов отсутствует.
+  - id: translate-rules
+    name: Правило-ориентированный переводчик tools/translate.py
+    license: Производные переводы исходных описаний (те же лицензии, что у источников)
+    url: ""
+    notes: Детерминированные правила «компонент + неисправность». Статус перевода — auto.
+
+manufacturers:
+  - id: SKODA
+    name_en: Skoda
+    name_ru: Шкода
+    kind: oem
+    source_id: public-catalogs
+
+vehicle_models:
+  - id: skoda-octavia
+    manufacturer_id: SKODA
+    name_en: Octavia
+    name_ru: Октавия
+
+vehicle_generations:
+  - id: skoda-octavia-a5-1z
+    model_id: skoda-octavia
+    code: A5 (1Z)
+    name_en: Octavia Mk2 (A5)
+    name_ru: Октавия второго поколения (A5)
+    years_start: 2004
+    years_end: 2013
+    platform: PQ35
+    notes: Поколение 1Z, платформа PQ35, шина CAN drivetrain 500 кбит/с.
+    source_id: public-catalogs
+    confidence: likely
+
+engines:
+  - id: vag-bse
+    code: BSE
+    name_en: 1.6 MPI 8V
+    name_ru: 1.6 MPI 8V
+    displacement_l: 1.595
+    cylinders: 4
+    valvetrain: SOHC 8V
+    fuel: petrol
+    power_hp: 102
+    power_kw: 75
+    torque_nm: 148
+    years_start: 2004
+    years_end: 2013
+    source_id: public-catalogs
+    confidence: likely
+    notes: Бензиновый 1.6 MPI 8 клапанов, распределённый впрыск; ставился на Octavia A5, Golf V, Jetta, Touran.
+
+engine_fitment:
+  - engine_id: vag-bse
+    generation_id: skoda-octavia-a5-1z
+    source_id: vcds-scan-user
+    notes: Задокументировано сканом VCDS данного автомобиля.
+
+protocols:
+  - id: iso15765-4-can-11-500
+    name_en: ISO 15765-4 CAN 11 bit / 500 kbaud
+    name_ru: ISO 15765-4 CAN, 11 бит / 500 кбит/с
+    iso_ref: ISO 15765-4
+    elm_atdpn: "6"
+    notes: Стандартный протокол законодательной диагностики большинства автомобилей 2008+ (в т.ч. VAG PQ35).
+  - id: iso15765-4-can-29-500
+    name_en: ISO 15765-4 CAN 29 bit / 500 kbaud
+    name_ru: ISO 15765-4 CAN, 29 бит / 500 кбит/с
+    iso_ref: ISO 15765-4
+    elm_atdpn: "7"
+  - id: iso15765-4-can-11-250
+    name_en: ISO 15765-4 CAN 11 bit / 250 kbaud
+    name_ru: ISO 15765-4 CAN, 11 бит / 250 кбит/с
+    iso_ref: ISO 15765-4
+    elm_atdpn: "8"
+  - id: iso15765-4-can-29-250
+    name_en: ISO 15765-4 CAN 29 bit / 250 kbaud
+    name_ru: ISO 15765-4 CAN, 29 бит / 250 кбит/с
+    iso_ref: ISO 15765-4
+    elm_atdpn: "9"
+  - id: sae-j1850-pwm
+    name_en: SAE J1850 PWM (41.6 kbaud)
+    name_ru: SAE J1850 PWM (41,6 кбит/с)
+    iso_ref: SAE J1850
+    elm_atdpn: "1"
+  - id: sae-j1850-vpw
+    name_en: SAE J1850 VPW (10.4 kbaud)
+    name_ru: SAE J1850 VPW (10,4 кбит/с)
+    iso_ref: SAE J1850
+    elm_atdpn: "2"
+  - id: iso9141-2
+    name_en: ISO 9141-2 (K-line)
+    name_ru: ISO 9141-2 (K-линия)
+    iso_ref: ISO 9141-2
+    elm_atdpn: "3"
+  - id: iso14230-4-kwp-5baud
+    name_en: ISO 14230-4 KWP2000 (5 baud init)
+    name_ru: ISO 14230-4 KWP2000 (инициализация 5 бод)
+    iso_ref: ISO 14230-4
+    elm_atdpn: "5"
+  - id: iso14230-4-kwp-fast
+    name_en: ISO 14230-4 KWP2000 (fast init)
+    name_ru: ISO 14230-4 KWP2000 (быстрая инициализация)
+    iso_ref: ISO 14230-4
+    elm_atdpn: "4"
+  - id: sae-j1939-can
+    name_en: SAE J1939 CAN
+    name_ru: SAE J1939 CAN (грузовые автомобили)
+    iso_ref: SAE J1939
+    elm_atdpn: "A"
+  - id: vag-tp20
+    name_en: VAG TP 2.0 (UDS transport, dealer diagnostics)
+    name_ru: VAG TP 2.0 (транспорт UDS, дилерская диагностика)
+    iso_ref: VAG-specific
+    notes: "НЕ доступен через ELM327. Упомянут как ограничение: расширенная VAG-диагностика требует отдельного транспорта."
+
+ecus:
+  - id: 06a906033kd
+    part_number: 06A906033KD
+    part_number_display: 06A 906 033 KD
+    system: engine
+    oem_name_en: Engine control module (ECM)
+    oem_name_ru: Блок управления двигателем (ЭБУ)
+    controller_family: Siemens Simos 7.1
+    controller_supplier: Siemens
+    protocol_id: iso15765-4-can-11-500
+    notes: 1.6 MPI (BSE/BGU/BSF). Поддерживает законодательную диагностику OBD-II (Mode 01/02/03/07/09/0A). Расширенные VAG-функции — только через TP 2.0, недоступно через ELM327.
+    source_id: vcds-scan-user
+    confidence: user_scan
+  - id: 7n0907530r
+    part_number: 7N0907530R
+    part_number_display: 7N0 907 530 R
+    system: gateway
+    oem_name_en: CAN gateway
+    oem_name_ru: Шлюз CAN (Gateway)
+    controller_family: VAG CAN Gateway (PQ35)
+    notes: Маршрутизирует сообщения между шинами drivetrain/comfort/infotainment. Стандартные OBD-II запросы через него идут только к ЭБУ двигателя (адрес 0x7DF/0x7E8).
+    source_id: vcds-scan-user
+    confidence: user_scan
+  - id: 1z0920803q
+    part_number: 1Z0920803Q
+    part_number_display: 1Z0 920 803 Q
+    system: instrument
+    oem_name_en: Instrument cluster
+    oem_name_ru: Приборная панель (щиток приборов)
+    source_id: vcds-scan-user
+    confidence: user_scan
+  - id: 1k0907379ak
+    part_number: 1K0907379AK
+    part_number_display: 1K0 907 379 AK
+    system: abs
+    oem_name_en: ABS/ESP control module (MK60)
+    oem_name_ru: Блок управления ABS/ESP (MK60)
+    controller_family: Bosch MK60
+    controller_supplier: Bosch
+    notes: Семейство MK60 — широко опубликованный факт для PQ35; номер из скана.
+    source_id: vcds-scan-user
+    confidence: user_scan
+  - id: 5j0919475a
+    part_number: 5J0919475A
+    part_number_display: 5J0 919 475 A
+    system: parking
+    oem_name_en: Parking aid control module
+    oem_name_ru: Блок управления парктроником
+    source_id: vcds-scan-user
+    confidence: user_scan
+  - id: 09g927750ja
+    part_number: 09G927750JA
+    part_number_display: 09G 927 750 JA
+    system: transmission
+    oem_name_en: Transmission control module (09G)
+    oem_name_ru: Блок управления АКПП (09G)
+    controller_family: Aisin TF-60SN (коробка 09G)
+    controller_supplier: Aisin
+    notes: АКПП 09G (Aisin TF-60SN) — 6-ступенчатая гидромеханическая.
+    source_id: vcds-scan-user
+    confidence: user_scan
+
+vehicle_ecus:
+  - generation_id: skoda-octavia-a5-1z
+    ecu_id: 06a906033kd
+    engine_id: vag-bse
+    role: ЭБУ двигателя
+    source_id: vcds-scan-user
+  - generation_id: skoda-octavia-a5-1z
+    ecu_id: 7n0907530r
+    role: Шлюз CAN
+    source_id: vcds-scan-user
+  - generation_id: skoda-octavia-a5-1z
+    ecu_id: 1z0920803q
+    role: Приборная панель
+    source_id: vcds-scan-user
+  - generation_id: skoda-octavia-a5-1z
+    ecu_id: 1k0907379ak
+    role: ABS/ESP
+    source_id: vcds-scan-user
+  - generation_id: skoda-octavia-a5-1z
+    ecu_id: 5j0919475a
+    role: Парктроник
+    source_id: vcds-scan-user
+  - generation_id: skoda-octavia-a5-1z
+    ecu_id: 09g927750ja
+    role: АКПП
+    source_id: vcds-scan-user
+
+adapter_compatibility:
+  - generation_id: skoda-octavia-a5-1z
+    ecu_id: 06a906033kd
+    adapter: Vgate iCar Pro BLE 4.0
+    protocol_id: iso15765-4-can-11-500
+    result: unverified
+    notes: Теоретически совместимо (адаптер поддерживает ISO 15765-4, ЭБУ поддерживает законодательный OBD-II). Полевая проверка адаптером ещё не проводилась.
+
+# Subset of standard Mode-01 PIDs expected from a legislative OBD-II engine
+# ECU of this class (Simos 7.1, petrol, EOBD). NOT confirmed by measurement —
+# support_level is 'expected'. Everything else stays 'unknown'.
+expected_mode01_pids:
+  - "00"  # supported PID bitmap (mandatory)
+  - "01"  # monitor status
+  - "02"  # freeze frame DTC
+  - "03"  # fuel system status
+  - "04"  # calculated load
+  - "05"  # coolant temperature
+  - "0B"  # MAP
+  - "0C"  # RPM
+  - "0D"  # vehicle speed
+  - "0F"  # intake air temperature
+  - "10"  # MAF
+  - "11"  # throttle position
+  - "13"  # O2 sensors present
+  - "14"  # O2 B1S1
+  - "15"  # O2 B1S2
+  - "1C"  # OBD standard
+  - "1F"  # runtime since start
+  - "20"  # supported PID bitmap
+  - "21"  # distance with MIL
+  - "30"  # warmups since clear
+  - "31"  # distance since clear
+  - "33"  # barometric pressure
+  - "40"  # supported PID bitmap
+  - "41"  # monitor status this cycle
+  - "42"  # control module voltage
+  - "43"  # absolute load
+  - "44"  # commanded equivalence ratio
+  - "45"  # relative throttle position
+  - "4D"  # time with MIL
+  - "4E"  # time since clear
+  - "50"  # max air flow
+  - "51"  # fuel type
+  - "5C"  # engine oil temperature
+  - "60"  # supported PID bitmap

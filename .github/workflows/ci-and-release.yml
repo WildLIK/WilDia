@@ -1,0 +1,155 @@
+name: CI & Release
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*.*.*' ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: Android Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Run unit tests
+        run: ./gradlew :android-app:app:testDebugUnitTest --no-daemon
+
+      - name: Upload test report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-report
+          path: android-app/app/build/reports/tests/testDebugUnitTest/
+
+  release:
+    name: Build Signed Release APK & Publish
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Validate tag matches build.gradle.kts versionName
+        shell: bash
+        run: |
+          TAG_VER="${GITHUB_REF_NAME#v}"
+          GRADLE_VER=$(grep -E 'versionName\s*=' android-app/app/build.gradle.kts | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')
+          echo "Tag version: $TAG_VER, Gradle versionName: $GRADLE_VER"
+          if [ "$TAG_VER" != "$GRADLE_VER" ]; then
+            echo "::error::Tag version ($TAG_VER) does not match build.gradle.kts versionName ($GRADLE_VER)"
+            exit 1
+          fi
+
+      - name: Check signing secrets
+        shell: bash
+        env:
+          KS_B64: ${{ secrets.OBD2_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.OBD2_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.OBD2_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.OBD2_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KS_B64" ] || [ -z "$KS_PASS" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASS" ]; then
+            echo "::error::Missing signing secrets (OBD2_KEYSTORE_BASE64, OBD2_KEYSTORE_PASSWORD, OBD2_KEY_ALIAS, OBD2_KEY_PASSWORD). Refusing to publish unsigned/debug APK."
+            exit 1
+          fi
+
+      - name: Decode release keystore
+        shell: bash
+        env:
+          KS_B64: ${{ secrets.OBD2_KEYSTORE_BASE64 }}
+        run: |
+          echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/obd2-release.keystore"
+
+      - name: Build signed release APK
+        env:
+          OBD2_KEYSTORE_PATH: ${{ runner.temp }}/obd2-release.keystore
+          OBD2_KEYSTORE_PASSWORD: ${{ secrets.OBD2_KEYSTORE_PASSWORD }}
+          OBD2_KEY_ALIAS: ${{ secrets.OBD2_KEY_ALIAS }}
+          OBD2_KEY_PASSWORD: ${{ secrets.OBD2_KEY_PASSWORD }}
+          OBD2_GITHUB_REPO: ${{ github.repository }}
+        run: |
+          chmod +x gradlew
+          ./gradlew :android-app:app:assembleRelease --no-daemon -POBD2_GITHUB_REPO="${{ github.repository }}"
+
+      - name: Verify APK signature, version, SHA-256, and generate release-manifest.json
+        id: pkg
+        shell: bash
+        run: |
+          APK_SRC="android-app/app/build/outputs/apk/release/app-release.apk"
+          if [ ! -f "$APK_SRC" ]; then
+            echo "::error::Signed release APK not found at $APK_SRC"
+            exit 1
+          fi
+          BUILD_TOOLS_DIR=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n1)
+          "$BUILD_TOOLS_DIR/apksigner" verify --print-certs "$APK_SRC"
+          BADGING=$("$BUILD_TOOLS_DIR/aapt2" dump badging "$APK_SRC" | head -n1)
+          echo "Badging: $BADGING"
+          VCODE=$(echo "$BADGING" | sed -E "s/.*versionCode='([0-9]+)'.*/\1/")
+          VNAME=$(echo "$BADGING" | sed -E "s/.*versionName='([^']+)'.*/\1/")
+          TAG="${GITHUB_REF_NAME}"
+          OUT_DIR="$RUNNER_TEMP/release_assets"
+          mkdir -p "$OUT_DIR"
+          APK_NAME="obd2-${TAG}-release.apk"
+          cp "$APK_SRC" "$OUT_DIR/$APK_NAME"
+          SHA=$(sha256sum "$OUT_DIR/$APK_NAME" | awk '{print $1}')
+          echo "$SHA  $APK_NAME" > "$OUT_DIR/$APK_NAME.sha256"
+          SIZE=$(stat -c%s "$OUT_DIR/$APK_NAME")
+          RELEASED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          APK_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/${APK_NAME}"
+          cat > "$OUT_DIR/release-manifest.json" <<EOF
+          {
+            "versionCode": $VCODE,
+            "versionName": "$VNAME",
+            "changelog": "Release $TAG (versionCode $VCODE)",
+            "apkUrl": "$APK_URL",
+            "sizeBytes": $SIZE,
+            "sha256": "$SHA",
+            "minAndroidSdk": 26,
+            "releasedAt": "$RELEASED_AT"
+          }
+          EOF
+          echo "out_dir=$OUT_DIR" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Cleanup keystore
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/obd2-release.keystore"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+          body: |
+            SHA-256: `${{ steps.pkg.outputs.sha256 }}`
+          files: |
+            ${{ steps.pkg.outputs.out_dir }}/obd2-${{ github.ref_name }}-release.apk
+            ${{ steps.pkg.outputs.out_dir }}/obd2-${{ github.ref_name }}-release.apk.sha256
+            ${{ steps.pkg.outputs.out_dir }}/release-manifest.json

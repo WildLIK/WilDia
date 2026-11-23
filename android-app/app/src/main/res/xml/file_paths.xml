@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <external-files-path name="reports" path="reports/" />
+    <external-files-path name="diag_reports" path="diag_reports/" />
+    <files-path name="internal" path="reports/" />
+    <files-path name="internal_diag" path="diag_reports/" />
+    <files-path name="apk_updates" path="apk_updates/" />
+</paths>
