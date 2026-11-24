@@ -106,6 +106,7 @@ android {
         }
         unitTests.all {
             it.maxHeapSize = "2g"
+            it.forkEvery = 1L
             it.testLogging {
                 events("passed", "failed", "skipped")
                 showStandardStreams = true

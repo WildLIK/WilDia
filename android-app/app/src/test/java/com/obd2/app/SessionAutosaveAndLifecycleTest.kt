@@ -406,7 +406,19 @@ class SessionAutosaveAndLifecycleTest {
             }
 
             // Sharesheet intent via FileProvider works offline
-            val shareIntent = exporter.createShareIntent(pdfFile, "application/pdf")
+            fun clearFileProviderCache() {
+                runCatching {
+                    val f = androidx.core.content.FileProvider::class.java.getDeclaredField("sCache")
+                    f.isAccessible = true
+                    (f.get(null) as? MutableMap<*, *>)?.clear()
+                }
+            }
+            clearFileProviderCache()
+            val shareIntent = try {
+                exporter.createShareIntent(pdfFile, "application/pdf")
+            } finally {
+                clearFileProviderCache()
+            }
             assertNotNull(shareIntent)
 
             // 3. Start a new connection without reading DTCs -> must NOT show old errors as current (Scenario 7)

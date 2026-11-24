@@ -110,10 +110,34 @@ class ObdLookupDb(private val context: Context) {
     }
 
     private fun openReadOnly(file: java.io.File): SQLiteDatabase {
+        open?.let { existing ->
+            if (existing.isOpen && existing.path == file.absolutePath) {
+                return existing
+            }
+            if (existing.isOpen) {
+                runCatching { existing.close() }
+            }
+            open = null
+        }
+        sharedConnection?.let { (sharedPath, sharedDb) ->
+            if (sharedPath == file.absolutePath && sharedDb.isOpen) {
+                open = sharedDb
+                return sharedDb
+            }
+        }
         val db = SQLiteDatabase.openDatabase(file.absolutePath, null, SQLiteDatabase.OPEN_READONLY)
         open = db
         sharedConnection = file.absolutePath to db
         return db
+    }
+
+    fun close() {
+        synchronized(ensureLock) {
+            open?.let { runCatching { it.close() } }
+            open = null
+            sharedConnection?.second?.let { runCatching { it.close() } }
+            sharedConnection = null
+        }
     }
 
     private fun closeSharedConnection(path: String) {
