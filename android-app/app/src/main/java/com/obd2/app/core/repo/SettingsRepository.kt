@@ -1,6 +1,9 @@
 package com.obd2.app.core.repo
 
 import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
@@ -8,7 +11,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
+import androidx.datastore.preferences.preferencesDataStoreFile
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -17,8 +20,22 @@ import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import java.util.WeakHashMap
 
-private val Context.dataStore by preferencesDataStore(name = "obd_settings")
+private val dataStoreLock = Any()
+private val dataStoreCache = WeakHashMap<Context, DataStore<Preferences>>()
+
+private val Context.dataStore: DataStore<Preferences>
+    get() {
+        val appCtx = applicationContext ?: this
+        synchronized(dataStoreLock) {
+            return dataStoreCache.getOrPut(appCtx) {
+                PreferenceDataStoreFactory.create(
+                    produceFile = { appCtx.preferencesDataStoreFile("obd_settings") },
+                )
+            }
+        }
+    }
 
 /**
  * Saved car profile. The built-in Skoda profile holds the owner's VCDS facts;

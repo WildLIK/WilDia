@@ -370,6 +370,7 @@ class DiagnosticRepository(
 
     private var pollingJob: Job? = null
     private val pollingMutex = Mutex()
+    private val sessionCloseMutex = Mutex()
     private var currentSessionId: Long = -1
         set(value) {
             field = value
@@ -419,7 +420,7 @@ class DiagnosticRepository(
             }
             if (t != null) {
                 launch {
-                    var sawConnected = false
+                    var sawConnected = t.isConnected()
                     t.state.collect { st ->
                         when (st) {
                             is TransportState.Connected -> {
@@ -888,17 +889,19 @@ class DiagnosticRepository(
     }
 
     private suspend fun closeActiveSessionInDb(status: String, reason: String?) {
-        if (currentSessionId > 0) {
-            val sid = currentSessionId
-            currentSessionId = -1
-            try {
-                appDb.sessionDao().closeSessionWithStatus(
-                    id = sid,
-                    ended = System.currentTimeMillis(),
-                    status = status,
-                    reason = reason,
-                )
-            } catch (_: Exception) {
+        sessionCloseMutex.withLock {
+            if (currentSessionId > 0) {
+                val sid = currentSessionId
+                currentSessionId = -1
+                try {
+                    appDb.sessionDao().closeSessionWithStatus(
+                        id = sid,
+                        ended = System.currentTimeMillis(),
+                        status = status,
+                        reason = reason,
+                    )
+                } catch (_: Exception) {
+                }
             }
         }
     }
@@ -1826,6 +1829,11 @@ class DiagnosticRepository(
         _quickDiagProgress.value = "Запуск быстрой диагностики…"
         return try {
             val res = QuickDiagnosticsRunner(this).run { step -> _quickDiagProgress.value = step }
+            if (res.incomplete && !isConnectedNow) {
+                val failReason = (transport?.state?.value as? TransportState.Failed)?.reason
+                    ?: "Потеря связи во время быстрой диагностики"
+                closeActiveSessionInDb(status = SessionStatus.CONNECTION_LOST, reason = failReason)
+            }
             _quickDiagResult.value = res
             res
         } finally {
