@@ -569,6 +569,61 @@ class DiagnosticRepository(
         connectWithTransport(classic, demo = false, deviceName = label, transportType = BtTransportType.CLASSIC_SPP, adapterMac = mac)
     }
 
+    suspend fun connectWifi(
+        endpoint: com.obd2.app.core.wifi.WifiObdEndpoint,
+        settingsSnapshot: SettingsRepository.Settings,
+    ) {
+        val label = "Wi-Fi ${endpoint.host}:${endpoint.port}"
+        markAdapterFound(label)
+        log.log(RawLog.Dir.INFO, "Подключение Wi-Fi TCP к ${endpoint.host}:${endpoint.port}")
+        runCatching { settings.setWifiEndpoint(endpoint.host, endpoint.port) }
+        val wifi = com.obd2.app.core.wifi.WifiTcpTransport(
+            context = context,
+            host = endpoint.host,
+            port = endpoint.port,
+            log = log,
+            reconnectAttempts = if (settingsSnapshot.autoReconnect) 2 else 0,
+            scope = scope,
+        )
+        connectWithTransport(
+            wifi,
+            demo = false,
+            deviceName = label,
+            transportType = BtTransportType.WIFI_TCP,
+            adapterMac = "${endpoint.host}:${endpoint.port}",
+        )
+    }
+
+    suspend fun connectUsb(
+        device: com.obd2.app.core.usb.UsbDeviceDescriptor,
+        baudRate: Int?,
+        backend: com.obd2.app.core.usb.UsbSerialBackend,
+        settingsSnapshot: SettingsRepository.Settings,
+    ) {
+        val label = device.displayName
+        markAdapterFound(label)
+        log.log(
+            RawLog.Dir.INFO,
+            "Подключение USB OTG к $label (${device.vidPidHex}, driver=${device.driverKind.name}, baud=${baudRate ?: "AUTO"})",
+        )
+        runCatching { settings.setUsbBaud(baudRate ?: 0) }
+        val usb = com.obd2.app.core.usb.UsbSerialTransport(
+            context = context,
+            device = device,
+            manualBaudRate = baudRate,
+            backend = backend,
+            log = log,
+            scope = scope,
+        )
+        connectWithTransport(
+            usb,
+            demo = false,
+            deviceName = label,
+            transportType = BtTransportType.USB_SERIAL,
+            adapterMac = "USB:${device.vidPidHex}",
+        )
+    }
+
     @Suppress("UNUSED_PARAMETER")
     suspend fun connectDemo(settingsSnapshot: SettingsRepository.Settings) {
         val demo = DemoElmTransport(scope = scope)

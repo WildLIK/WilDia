@@ -73,6 +73,45 @@ class ApkUpdateManager(
 ) {
     private val json = Json { ignoreUnknownKeys = true }
     private val updatesDir: File by lazy { File(context.filesDir, "apk_updates").apply { mkdirs() } }
+    private val readyManifestFile: File get() = File(updatesDir, "ready_update_manifest.json")
+
+    fun apkFileFor(manifest: ApkReleaseManifest): File =
+        File(updatesDir, "obd2_${manifest.versionName}_${manifest.versionCode}.apk")
+
+    fun loadPersistedReadyUpdate(
+        currentVersionCode: Int = BuildConfig.VERSION_CODE,
+        expectedSignerSha256Override: String? = null,
+    ): ApkVerificationResult.ReadyToInstall? {
+        if (!readyManifestFile.exists()) return null
+        val manifest = runCatching {
+            json.decodeFromString<ApkReleaseManifest>(readyManifestFile.readText(Charsets.UTF_8))
+        }.getOrNull() ?: run {
+            readyManifestFile.delete()
+            return null
+        }
+        if (manifest.versionCode <= currentVersionCode) {
+            readyManifestFile.delete()
+            apkFileFor(manifest).delete()
+            return null
+        }
+        val apkFile = apkFileFor(manifest)
+        if (!apkFile.exists()) {
+            readyManifestFile.delete()
+            return null
+        }
+        val actualSha = runCatching { sha256File(apkFile) }.getOrNull()
+        if (actualSha == null || !actualSha.equals(manifest.sha256.trim(), ignoreCase = true)) {
+            readyManifestFile.delete()
+            apkFile.delete()
+            return null
+        }
+        return verifyApkArchive(
+            apkFile = apkFile,
+            manifest = manifest,
+            currentVersionCode = currentVersionCode,
+            expectedSignerSha256Override = expectedSignerSha256Override,
+        ) as? ApkVerificationResult.ReadyToInstall
+    }
 
     fun checkForUpdate(
         manifestUrl: String = BuildConfig.APK_UPDATE_MANIFEST_URL,
@@ -248,7 +287,19 @@ class ApkUpdateManager(
         }
 
         val stagingFile = partialFileFor(manifest.versionCode)
-        val finalFile = File(updatesDir, "obd2_${manifest.versionName}_${manifest.versionCode}.apk")
+        val finalFile = apkFileFor(manifest)
+
+        // Reuse an already-downloaded and verified APK without re-downloading over the network.
+        if (finalFile.exists()) {
+            val existingSha = runCatching { sha256File(finalFile) }.getOrNull()
+            if (existingSha != null && existingSha.equals(manifest.sha256.trim(), ignoreCase = true)) {
+                val total = finalFile.length().coerceAtLeast(manifest.sizeBytes)
+                onProgress(ApkDownloadProgress(total, total))
+                return verifyApkArchive(finalFile, manifest, currentVersionCode, expectedSignerSha256Override)
+            } else {
+                finalFile.delete()
+            }
+        }
 
         val downloadErr = runCatching {
             if (stagingFile.exists() && manifest.sizeBytes > 0 && stagingFile.length() >= manifest.sizeBytes) {
@@ -360,6 +411,12 @@ class ApkUpdateManager(
             )
         }
 
+        runCatching {
+            readyManifestFile.writeText(
+                json.encodeToString(ApkReleaseManifest.serializer(), manifest),
+                Charsets.UTF_8,
+            )
+        }
         return ApkVerificationResult.ReadyToInstall(apkFile, manifest)
     }
 

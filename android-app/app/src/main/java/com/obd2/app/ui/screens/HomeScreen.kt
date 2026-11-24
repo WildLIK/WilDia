@@ -57,7 +57,18 @@ fun HomeScreen(vm: ObdViewModel, nav: NavHostController) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
     val registryError by vm.registryError.collectAsState()
+    val storageError by vm.storageError.collectAsState()
     val lastCrash by vm.lastCrash.collectAsState()
+
+    if (storageError != null) {
+        Panel(title = "Ошибка хранилища данных") {
+            Text(
+                storageError!!,
+                color = Red,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+    }
 
     if (lastCrash != null) {
         Panel(title = "Предупреждение") {

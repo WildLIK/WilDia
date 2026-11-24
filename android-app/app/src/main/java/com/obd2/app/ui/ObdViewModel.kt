@@ -308,10 +308,100 @@ class ObdViewModel(
             BtTransportType.CLASSIC_SPP -> {
                 repo.connectClassic(saved.mac, saved.name, settingsFlow.value)
             }
+            BtTransportType.WIFI_TCP -> {
+                val parts = saved.mac.split(':')
+                val host = parts.getOrNull(0)?.trim().takeIf { !it.isNullOrBlank() } ?: settingsFlow.value.lastWifiHost
+                val port = parts.getOrNull(1)?.toIntOrNull()?.takeIf { it in 1..65535 } ?: settingsFlow.value.lastWifiPort
+                repo.connectWifi(com.obd2.app.core.wifi.WifiObdEndpoint(host, port), settingsFlow.value)
+            }
+            BtTransportType.USB_SERIAL -> {
+                refreshUsbDevices()
+                val targetVidPid = saved.mac.removePrefix("USB:")
+                val dev = _usbDevices.value.firstOrNull {
+                    it.isSupportedSerialAdapter && it.vidPidHex.equals(targetVidPid, ignoreCase = true)
+                } ?: _usbDevices.value.firstOrNull { it.isSupportedSerialAdapter }
+                if (dev != null) {
+                    val baud = settingsFlow.value.lastUsbBaud.takeIf { it > 0 }
+                    repo.connectUsb(dev, baud, usbBackend, settingsFlow.value)
+                } else {
+                    _usbStatusMessage.value = "Сохранённый USB-адаптер ($targetVidPid) сейчас не подключён"
+                }
+            }
             else -> {
                 repo.connectBle(BleDevice(saved.mac, saved.name, -70), settingsFlow.value)
             }
         }
+    }
+
+    // ---- Wi-Fi TCP ELM327 ----
+    private val _wifiNetworkStatus = MutableStateFlow(
+        com.obd2.app.core.wifi.WifiNetworkBinder.inspectStatus(app.applicationContext),
+    )
+    val wifiNetworkStatus: StateFlow<com.obd2.app.core.wifi.WifiNetworkStatus> = _wifiNetworkStatus
+
+    private val _wifiProbing = MutableStateFlow(false)
+    val wifiProbing: StateFlow<Boolean> = _wifiProbing
+
+    private val _wifiFoundEndpoints = MutableStateFlow<List<com.obd2.app.core.wifi.WifiObdEndpoint>>(emptyList())
+    val wifiFoundEndpoints: StateFlow<List<com.obd2.app.core.wifi.WifiObdEndpoint>> = _wifiFoundEndpoints
+
+    fun refreshWifiStatus() {
+        _wifiNetworkStatus.value = com.obd2.app.core.wifi.WifiNetworkBinder.inspectStatus(getApplication())
+    }
+
+    fun probeWifiAdapters(customHost: String? = null, customPort: Int? = null) =
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            _wifiProbing.value = true
+            try {
+                refreshWifiStatus()
+                _wifiFoundEndpoints.value = com.obd2.app.core.wifi.WifiEndpointProber.probeReachable(
+                    context = getApplication(),
+                    customHost = customHost,
+                    customPort = customPort,
+                )
+            } finally {
+                _wifiProbing.value = false
+            }
+        }
+
+    fun connectWifi(host: String, port: Int) = viewModelScope.launch {
+        stopScan()
+        repo.connectWifi(com.obd2.app.core.wifi.WifiObdEndpoint(host.trim(), port), settingsFlow.value)
+    }
+
+    // ---- USB Serial OTG ELM327 ----
+    private val usbBackend: com.obd2.app.core.usb.UsbSerialBackend by lazy {
+        com.obd2.app.core.usb.AndroidUsbSerialBackend(getApplication())
+    }
+
+    private val _usbDevices = MutableStateFlow<List<com.obd2.app.core.usb.UsbDeviceDescriptor>>(emptyList())
+    val usbDevices: StateFlow<List<com.obd2.app.core.usb.UsbDeviceDescriptor>> = _usbDevices
+
+    private val _usbStatusMessage = MutableStateFlow<String?>(null)
+    val usbStatusMessage: StateFlow<String?> = _usbStatusMessage
+
+    fun refreshUsbDevices() {
+        val list = runCatching { usbBackend.listDevices() }.getOrElse { emptyList() }
+        _usbDevices.value = list
+        _usbStatusMessage.value = if (list.isEmpty()) {
+            "USB-устройства не обнаружены. Подключите адаптер через OTG-кабель."
+        } else null
+    }
+
+    fun requestUsbPermission(device: com.obd2.app.core.usb.UsbDeviceDescriptor) {
+        usbBackend.requestPermission(device.deviceId) { granted ->
+            refreshUsbDevices()
+            _usbStatusMessage.value = if (granted) {
+                "Разрешение USB выдано для ${device.displayName}"
+            } else {
+                "Пользователь отклонил разрешение USB для ${device.displayName}"
+            }
+        }
+    }
+
+    fun connectUsb(device: com.obd2.app.core.usb.UsbDeviceDescriptor, baudRate: Int?) = viewModelScope.launch {
+        stopScan()
+        repo.connectUsb(device, baudRate, usbBackend, settingsFlow.value)
     }
 
     fun connect(device: BleDevice) = viewModelScope.launch {
@@ -336,6 +426,9 @@ class ObdViewModel(
             }
             BtTransportType.CLASSIC_SPP -> {
                 repo.connectClassic(adapter.mac, adapter.name.ifEmpty { adapter.mac }, settingsFlow.value)
+            }
+            BtTransportType.WIFI_TCP, BtTransportType.USB_SERIAL -> {
+                _scanError.value = "Для Wi-Fi и USB используйте соответствующую вкладку режима подключения"
             }
             null -> {
                 _scanError.value = resolved.reasonRu
@@ -445,19 +538,20 @@ class ObdViewModel(
         onResult(res)
     }
 
+    private val _roomError = MutableStateFlow<String?>(null)
+    val storageError: StateFlow<String?> = kotlinx.coroutines.flow.combine(
+        _roomError,
+        settings.storageError,
+    ) { roomErr, dsErr ->
+        listOfNotNull(roomErr, dsErr).joinToString(" · ").takeIf { it.isNotBlank() }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
     val sessions: StateFlow<List<SessionEntity>> =
-        // WhileSubscribed (not Lazily/Eagerly): the Room observation must STOP
-        // as soon as the UI stops collecting, so a pending query never crosses
-        // a Robolectric environment boundary in tests (and battery/db load in
-        // production matches actual UI needs).
-        //
-        // .catch: a Room observation that races an environment swap (Robolectric)
-        // or a transient DB hiccup must never crash the app or poison the next
-        // screen — the session list just renders empty.
         repo.appDb.sessionDao().allSessions()
             .catch { e ->
                 container.log.log(com.obd2.app.core.log.RawLog.Dir.ERROR,
-                    "[VM] sessions flow error (suppressed): ${e.message}")
+                    "[VM] sessions flow error: ${e.message}")
+                _roomError.value = "Ошибка чтения истории сеансов: ${e.message}"
             }
             .stateIn(
                 viewModelScope, SharingStarted.WhileSubscribed(), emptyList(),
@@ -466,7 +560,8 @@ class ObdViewModel(
         repo.appDb.dtcRecordDao().recent(200)
             .catch { e ->
                 container.log.log(com.obd2.app.core.log.RawLog.Dir.ERROR,
-                    "[VM] recent DTC flow error (suppressed): ${e.message}")
+                    "[VM] recent DTC flow error: ${e.message}")
+                _roomError.value = "Ошибка чтения истории DTC: ${e.message}"
             }
             .stateIn(
                 viewModelScope, SharingStarted.WhileSubscribed(), emptyList(),
@@ -1009,9 +1104,17 @@ class ObdViewModel(
     private val _apkVerifyResult = MutableStateFlow<com.obd2.app.core.updates.ApkVerificationResult?>(null)
     val apkVerifyResult: StateFlow<com.obd2.app.core.updates.ApkVerificationResult?> = _apkVerifyResult
 
+    fun refreshPersistedApkUpdate() = viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+        if (_apkVerifyResult.value == null) {
+            repo.apkUpdateManager.loadPersistedReadyUpdate()?.let { ready ->
+                _apkVerifyResult.value = ready
+            }
+        }
+    }
+
     fun checkApkUpdates() = viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-        _apkVerifyResult.value = null
         _apkCheckResult.value = repo.apkUpdateManager.checkForUpdate()
+        refreshPersistedApkUpdate()
     }
 
     fun downloadAndVerifyApk(manifest: com.obd2.app.core.updates.ApkReleaseManifest) = viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {

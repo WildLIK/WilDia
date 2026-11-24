@@ -75,6 +75,13 @@ class Elm327Client(
         val voltage: Float? = null,
         val echo: Boolean = false,
         val headers: Boolean = false,
+        val supportsEchoOff: Boolean = false,
+        val supportsHeaders: Boolean? = null,
+        val supportsSpacesControl: Boolean = false,
+        val supportsAutoProtocol: Boolean = false,
+        val supportsCanAddressing: Boolean = false,
+        val supportsAdaptiveTiming: Boolean = false,
+        val capabilityNotes: List<String> = emptyList(),
     )
 
     /** Connects transport and runs the safe init sequence. Returns null on success, else error text. */
@@ -113,30 +120,68 @@ class Elm327Client(
         // ATE0 — echo off. Any echoed command line is stripped by matching anyway.
         val ate0 = command("ATE0", timeoutMs = 2000, allowRetries = false)
         echoEnabled = false
-        _info.value = _info.value.copy(echo = false)
+        val echoOffOk = isCommandAccepted(ate0)
 
         val ati = command("ATI", timeoutMs = 2000, allowRetries = false)
         val identity = (ati as? ElmResponse.Ok)?.lines?.firstOrNull()
-        _info.value = _info.value.copy(identity = identity)
+        _info.value = _info.value.copy(identity = identity, echo = false, supportsEchoOff = echoOffOk)
 
         val anyElmOk = atz is ElmResponse.Ok || ate0 is ElmResponse.Ok || ati is ElmResponse.Ok
         if (!anyElmOk) {
             return "Адаптер ELM327 не отвечает (таймаут ATZ/ATE0/ATI)"
         }
 
-        command("ATL0", timeoutMs = 2000)   // linefeeds off
-        command("ATS1", timeoutMs = 2000)   // spaces on (readable logs, easy parsing)
-        command("ATH0", timeoutMs = 2000)   // headers off for standard parsing
-        _info.value = _info.value.copy(headers = false)
+        val atl0 = command("ATL0", timeoutMs = 2000)   // linefeeds off
+        val ats1 = command("ATS1", timeoutMs = 2000)   // spaces on (readable logs, easy parsing)
+        val ath1 = command("ATH1", timeoutMs = 2000)   // probe header control
+        val ath0 = command("ATH0", timeoutMs = 2000)   // restore headers off for standard parsing
+        val atat1 = command("ATAT1", timeoutMs = 2000) // probe adaptive timing
 
-        if (config.autoProtocol) {
+        val atspResp = if (config.autoProtocol) {
             command("ATSP0", timeoutMs = 2000)
         } else {
             command("ATSP${config.protocolNumber}", timeoutMs = 2000)
         }
 
         refreshProtocolAndVoltage()
+
+        val canHdrOk = if (_info.value.isCanProtocol == true) {
+            val shOk = isCommandAccepted(command("ATSH 7DF", timeoutMs = 1500))
+            val craOk = isCommandAccepted(command("ATCRA", timeoutMs = 1500))
+            shOk || craOk
+        } else {
+            false
+        }
+
+        val notes = buildList {
+            if (!echoOffOk) add("ATE0 отклонён (эхо может оставаться)")
+            if (!isCommandAccepted(atl0)) add("ATL0 не поддержан")
+            if (!isCommandAccepted(ats1)) add("ATS1 не поддержан")
+            if (!isCommandAccepted(ath1) || !isCommandAccepted(ath0)) {
+                add("ATH1/ATH0 не подтверждён (возможны ограничения разделения ЭБУ)")
+            }
+            if (!isCommandAccepted(atat1)) add("ATAT1 не поддержан")
+            if (!isCommandAccepted(atspResp)) add("ATSP отклонён")
+        }
+
+        _info.value = _info.value.copy(
+            headers = false,
+            supportsSpacesControl = isCommandAccepted(ats1),
+            supportsHeaders = isCommandAccepted(ath1) && isCommandAccepted(ath0),
+            supportsAutoProtocol = config.autoProtocol && isCommandAccepted(atspResp),
+            supportsCanAddressing = canHdrOk,
+            supportsAdaptiveTiming = isCommandAccepted(atat1),
+            capabilityNotes = notes,
+        )
         return null
+    }
+
+    private fun isCommandAccepted(resp: ElmResponse): Boolean {
+        if (resp !is ElmResponse.Ok) return false
+        return resp.lines.none { line ->
+            val t = line.trim().uppercase()
+            t == "?" || t.contains("ERROR")
+        }
     }
 
     /**

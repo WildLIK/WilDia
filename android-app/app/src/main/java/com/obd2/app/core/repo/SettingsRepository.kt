@@ -10,6 +10,9 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
@@ -88,6 +91,9 @@ class SettingsRepository(private val context: Context) {
         val autoCheckAppUpdates = booleanPreferencesKey("auto_check_app_updates")
         val notifyAppUpdates = booleanPreferencesKey("notify_app_updates")
         val appUpdateIntervalHours = intPreferencesKey("app_update_interval_hours")
+        val lastWifiHost = stringPreferencesKey("last_wifi_host")
+        val lastWifiPort = intPreferencesKey("last_wifi_port")
+        val lastUsbBaud = intPreferencesKey("last_usb_baud")
     }
 
     data class Settings(
@@ -115,11 +121,17 @@ class SettingsRepository(private val context: Context) {
         val autoCheckAppUpdates: Boolean = false,
         val notifyAppUpdates: Boolean = true,
         val appUpdateIntervalHours: Int = 24,
+        val lastWifiHost: String = "192.168.0.10",
+        val lastWifiPort: Int = 35000,
+        val lastUsbBaud: Int = 0, // 0 = Auto
     )
 
     enum class Units { METRIC, IMPERIAL }
 
     private val json = Json { ignoreUnknownKeys = true }
+
+    private val _storageError = MutableStateFlow<String?>(null)
+    val storageError: StateFlow<String?> = _storageError
 
     /** Explicit developer/test fixture (owner's VCDS scan). Never auto-applied on fresh install. */
     fun devTestSkodaProfile(): VehicleProfile = VehicleProfile(
@@ -162,17 +174,29 @@ class SettingsRepository(private val context: Context) {
             autoCheckAppUpdates = p[Keys.autoCheckAppUpdates] ?: false,
             notifyAppUpdates = p[Keys.notifyAppUpdates] ?: true,
             appUpdateIntervalHours = p[Keys.appUpdateIntervalHours] ?: 24,
+            lastWifiHost = p[Keys.lastWifiHost]?.takeIf { it.isNotBlank() } ?: "192.168.0.10",
+            lastWifiPort = p[Keys.lastWifiPort]?.takeIf { it in 1..65535 } ?: 35000,
+            lastUsbBaud = p[Keys.lastUsbBaud] ?: 0,
         )
+    }.catch { e ->
+        _storageError.value = "Ошибка чтения настроек DataStore: ${e.message ?: "неизвестная ошибка"}"
     }
 
     /** Saved user profiles (empty on clean install — no default test car). */
     val profilesFlow: Flow<List<VehicleProfile>> = context.dataStore.data.map { p ->
+        val raw = p[Keys.profiles] ?: "[]"
         runCatching {
             json.decodeFromString(
                 ListSerializer(VehicleProfile.serializer()),
-                p[Keys.profiles] ?: "[]",
+                raw,
             )
-        }.getOrDefault(emptyList())
+        }.getOrElse { e ->
+            _storageError.value = "Ошибка чтения сохранённых профилей автомобилей: ${e.message}"
+            emptyList()
+        }
+    }.catch { e ->
+        _storageError.value = "Ошибка доступа к хранилищу профилей: ${e.message}"
+        emit(emptyList())
     }
 
     val activeProfileIdFlow: Flow<String> = context.dataStore.data.map { p ->
@@ -197,7 +221,22 @@ class SettingsRepository(private val context: Context) {
                 ListSerializer(SavedAdapterInfo.serializer()),
                 p[Keys.savedAdaptersJson] ?: "[]",
             )
-        }.getOrDefault(emptyList())
+        }.getOrElse { e ->
+            _storageError.value = "Ошибка чтения списка сохранённых адаптеров: ${e.message}"
+            emptyList()
+        }
+    }.catch { e ->
+        _storageError.value = "Ошибка доступа к списку адаптеров: ${e.message}"
+        emit(emptyList())
+    }
+
+    suspend fun setWifiEndpoint(host: String, port: Int) = context.dataStore.edit { p ->
+        p[Keys.lastWifiHost] = host.trim()
+        p[Keys.lastWifiPort] = port
+    }
+
+    suspend fun setUsbBaud(baud: Int) = context.dataStore.edit { p ->
+        p[Keys.lastUsbBaud] = baud
     }
 
     suspend fun recordSuccessfulAdapter(

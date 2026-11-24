@@ -1,7 +1,9 @@
 package com.obd2.app.ui.screens
 
 import android.Manifest
+import android.content.Intent
 import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.horizontalScroll
@@ -24,6 +26,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -34,11 +37,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.obd2.app.core.ble.BleScanner
 import com.obd2.app.core.bt.BtScanMode
@@ -47,6 +48,8 @@ import com.obd2.app.core.bt.DiscoveredAdapter
 import com.obd2.app.core.bt.SppProfileStatus
 import com.obd2.app.core.bt.TransportResolver
 import com.obd2.app.core.repo.DiagnosticRepository
+import com.obd2.app.core.usb.UsbBaudPresets
+import com.obd2.app.core.wifi.WifiObdPresets
 import com.obd2.app.ui.ObdViewModel
 import com.obd2.app.ui.theme.Amber
 import com.obd2.app.ui.theme.Green
@@ -54,8 +57,15 @@ import com.obd2.app.ui.theme.Primary
 import com.obd2.app.ui.theme.Red
 import com.obd2.app.ui.theme.TextDim
 
+private enum class ConnectModeTab {
+    BLUETOOTH,
+    WIFI,
+    USB,
+}
+
 @Composable
 fun ConnectScreen(vm: ObdViewModel) {
+    val ctx = LocalContext.current
     val adapters by vm.adapters.collectAsState()
     val scanning by vm.scanning.collectAsState()
     val scanMode by vm.scanMode.collectAsState()
@@ -65,6 +75,19 @@ fun ConnectScreen(vm: ObdViewModel) {
     val pipeline by vm.pipelineStatus.collectAsState()
     val lastAdapter by vm.lastAdapter.collectAsState()
     val savedAdapters by vm.savedAdapters.collectAsState()
+    val settings by vm.settingsFlow.collectAsState()
+    val wifiStatus by vm.wifiNetworkStatus.collectAsState()
+    val wifiProbing by vm.wifiProbing.collectAsState()
+    val wifiEndpoints by vm.wifiFoundEndpoints.collectAsState()
+    val usbDevices by vm.usbDevices.collectAsState()
+    val usbStatusMsg by vm.usbStatusMessage.collectAsState()
+
+    var activeTab by remember { mutableStateOf(ConnectModeTab.BLUETOOTH) }
+    var wifiHost by remember(settings.lastWifiHost) { mutableStateOf(settings.lastWifiHost) }
+    var wifiPortText by remember(settings.lastWifiPort) { mutableStateOf(settings.lastWifiPort.toString()) }
+    var selectedUsbBaud by remember(settings.lastUsbBaud) {
+        mutableStateOf(settings.lastUsbBaud.takeIf { it > 0 })
+    }
     var showOtherDevices by remember { mutableStateOf(false) }
 
     val openStartMs = remember { android.os.SystemClock.elapsedRealtime() }
@@ -137,80 +160,319 @@ fun ConnectScreen(vm: ObdViewModel) {
 
         val missing = vm.missingPermissions
         val missingRuntime = vm.missingRuntimePermissions
-        if (missing.isNotEmpty()) {
-            Panel(title = "Разрешения") {
-                Text(
-                    "Для работы BLE-сканера нужны разрешения: " +
-                        missing.joinToString(", ") { p ->
-                            when (p) {
-                                Manifest.permission.BLUETOOTH_SCAN -> "Сканирование рядом"
-                                Manifest.permission.BLUETOOTH_CONNECT -> "Управление Bluetooth"
-                                Manifest.permission.BLUETOOTH -> "Bluetooth (установочное)"
-                                Manifest.permission.BLUETOOTH_ADMIN -> "Bluetooth Admin (установочное)"
-                                else -> "Местоположение"
+        Panel(title = "Режим транспорта") {
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                BtScanMode.entries.forEach { mode ->
+                    FilterChip(
+                        selected = activeTab == ConnectModeTab.BLUETOOTH && scanMode == mode,
+                        onClick = {
+                            activeTab = ConnectModeTab.BLUETOOTH
+                            if (scanMode != mode) {
+                                vm.setScanMode(mode)
+                                if (scanning) vm.startScan(mode)
                             }
                         },
-                    color = TextDim,
-                    style = MaterialTheme.typography.bodyMedium,
+                        label = { Text(mode.labelRu) },
+                    )
+                }
+                FilterChip(
+                    selected = activeTab == ConnectModeTab.WIFI,
+                    onClick = {
+                        activeTab = ConnectModeTab.WIFI
+                        vm.refreshWifiStatus()
+                    },
+                    label = { Text("Wi-Fi") },
                 )
-                Spacer(Modifier.height(8.dp))
-                if (missingRuntime.isNotEmpty()) {
-                    Button(onClick = { permissionLauncher.launch(missingRuntime.toTypedArray()) }) {
-                        Text("Выдать разрешения")
-                    }
-                } else {
-                    Text(
-                        "Системное установочное разрешение Bluetooth отсутствует. Переустановите APK или проверьте политику устройства.",
-                        color = Amber,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
+                FilterChip(
+                    selected = activeTab == ConnectModeTab.USB,
+                    onClick = {
+                        activeTab = ConnectModeTab.USB
+                        vm.refreshUsbDevices()
+                    },
+                    label = { Text("USB (OTG)") },
+                )
             }
-        } else {
-            if (vm.locationDisabledWarning) {
-                Panel(title = "Включите геолокацию") {
-                    Text(
-                        "На Android 8–11 (API ≤ 30) поиск BLE и Bluetooth Classic адаптеров требует включённой службы местоположения (GPS/Геолокация) в шторке системы.",
-                        color = Amber,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
-            }
-            Panel(title = "Режим транспорта") {
-                Row(
-                    modifier = Modifier.horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    BtScanMode.entries.forEach { mode ->
-                        FilterChip(
-                            selected = scanMode == mode,
-                            onClick = {
-                                if (scanMode != mode) {
-                                    vm.setScanMode(mode)
-                                    if (scanning) vm.startScan(mode)
-                                }
-                            },
-                            label = { Text(mode.labelRu) },
-                        )
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Button(onClick = { if (scanning) vm.stopScan() else vm.startScan() }) {
-                        Text(if (scanning) "Остановить поиск" else "Искать адаптеры")
-                    }
-                    scanPhase?.let { phase ->
-                        Text(phase, color = Amber, style = MaterialTheme.typography.bodyMedium)
+
+            if (activeTab == ConnectModeTab.BLUETOOTH) {
+                if (missing.isEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Button(onClick = { if (scanning) vm.stopScan() else vm.startScan() }) {
+                            Text(if (scanning) "Остановить поиск" else "Искать адаптеры")
+                        }
+                        scanPhase?.let { phase ->
+                            Text(phase, color = Amber, style = MaterialTheme.typography.bodyMedium)
+                        }
                     }
                 }
             }
         }
 
-        scanError?.let {
-            Text("Ошибка: $it", color = Red, style = MaterialTheme.typography.bodyMedium)
+        when (activeTab) {
+            ConnectModeTab.WIFI -> {
+                Panel(title = "Wi-Fi ELM327 (TCP)") {
+                    KeyValue(
+                        "Wi-Fi сеть",
+                        if (wifiStatus.wifiNetworkAvailable) {
+                            buildString {
+                                append(wifiStatus.ssid ?: "подключена")
+                                wifiStatus.gatewayIp?.let { append(" · шлюз $it") }
+                                if (!wifiStatus.hasInternet) append(" (без интернета — ОК)")
+                            }
+                        } else {
+                            "не подключена"
+                        },
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        OutlinedButton(onClick = {
+                            runCatching { ctx.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) }
+                        }) {
+                            Text("Настройки Wi-Fi")
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                val p = wifiPortText.toIntOrNull() ?: 35000
+                                vm.probeWifiAdapters(wifiHost, p)
+                            },
+                            enabled = !wifiProbing,
+                        ) {
+                            Text(if (wifiProbing) "Поиск…" else "Найти адаптер в сети")
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text("Предустановки:", style = MaterialTheme.typography.labelMedium)
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        WifiObdPresets.common.forEach { preset ->
+                            FilterChip(
+                                selected = wifiHost == preset.host && wifiPortText == preset.port.toString(),
+                                onClick = {
+                                    wifiHost = preset.host
+                                    wifiPortText = preset.port.toString()
+                                },
+                                label = { Text("${preset.host}:${preset.port}") },
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        OutlinedTextField(
+                            value = wifiHost,
+                            onValueChange = { wifiHost = it },
+                            label = { Text("IP-адрес") },
+                            singleLine = true,
+                            modifier = Modifier.weight(2f),
+                        )
+                        OutlinedTextField(
+                            value = wifiPortText,
+                            onValueChange = { wifiPortText = it.filter { ch -> ch.isDigit() } },
+                            label = { Text("Порт") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    val portNum = wifiPortText.toIntOrNull()
+                    Button(
+                        onClick = { if (portNum != null) vm.connectWifi(wifiHost, portNum) },
+                        enabled = wifiHost.isNotBlank() && portNum != null && portNum in 1..65535,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Подключиться по Wi-Fi")
+                    }
+                    if (wifiEndpoints.isNotEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text("Найденные в сети адреса:", style = MaterialTheme.typography.labelLarge)
+                        wifiEndpoints.forEach { ep ->
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    "${ep.label}${if (ep.verifiedElm) " · ELM327 OK" else ""}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (ep.verifiedElm) Green else Amber,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                TextButton(onClick = {
+                                    wifiHost = ep.host
+                                    wifiPortText = ep.port.toString()
+                                    vm.connectWifi(ep.host, ep.port)
+                                }) {
+                                    Text("Подкл.")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            ConnectModeTab.USB -> {
+                Panel(title = "USB ELM327 (OTG Serial)") {
+                    Button(onClick = { vm.refreshUsbDevices() }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Обнаружить USB-устройства")
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text("Скорость порта (бод):", style = MaterialTheme.typography.labelMedium)
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        FilterChip(
+                            selected = selectedUsbBaud == null,
+                            onClick = { selectedUsbBaud = null },
+                            label = { Text("Авто") },
+                        )
+                        UsbBaudPresets.autoProbeRates.forEach { rate ->
+                            FilterChip(
+                                selected = selectedUsbBaud == rate,
+                                onClick = { selectedUsbBaud = rate },
+                                label = { Text(rate.toString()) },
+                            )
+                        }
+                    }
+                    usbStatusMsg?.let { msg ->
+                        Spacer(Modifier.height(6.dp))
+                        Text(msg, color = Amber, style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (usbDevices.isNotEmpty()) {
+                        Spacer(Modifier.height(6.dp))
+                        usbDevices.forEach { dev ->
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            ) {
+                                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(dev.displayName, style = MaterialTheme.typography.titleMedium)
+                                    Text(
+                                        "${dev.driverKind.labelRu} · VID:PID ${dev.vidPidHex}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (dev.isSupportedSerialAdapter) Green else Red,
+                                    )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        if (dev.isSupportedSerialAdapter && !dev.hasPermission) {
+                                            OutlinedButton(onClick = { vm.requestUsbPermission(dev) }) {
+                                                Text("Выдать разрешение USB")
+                                            }
+                                        }
+                                        Button(
+                                            onClick = { vm.connectUsb(dev, selectedUsbBaud) },
+                                            enabled = dev.isSupportedSerialAdapter && dev.hasPermission,
+                                        ) {
+                                            Text("Подключиться")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            ConnectModeTab.BLUETOOTH -> {
+                if (missing.isNotEmpty()) {
+                    Panel(title = "Разрешения") {
+                        Text(
+                            "Для работы BLE-сканера нужны разрешения: " +
+                                missing.joinToString(", ") { p ->
+                                    when (p) {
+                                        Manifest.permission.BLUETOOTH_SCAN -> "Сканирование рядом"
+                                        Manifest.permission.BLUETOOTH_CONNECT -> "Управление Bluetooth"
+                                        Manifest.permission.BLUETOOTH -> "Bluetooth (установочное)"
+                                        Manifest.permission.BLUETOOTH_ADMIN -> "Bluetooth Admin (установочное)"
+                                        else -> "Местоположение"
+                                    }
+                                },
+                            color = TextDim,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        if (missingRuntime.isNotEmpty()) {
+                            Button(onClick = { permissionLauncher.launch(missingRuntime.toTypedArray()) }) {
+                                Text("Выдать разрешения")
+                            }
+                        } else {
+                            Text(
+                                "Системное установочное разрешение Bluetooth отсутствует. Переустановите APK или проверьте политику устройства.",
+                                color = Amber,
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
+                    }
+                } else {
+                    if (vm.locationDisabledWarning) {
+                        Panel(title = "Включите геолокацию") {
+                            Text(
+                                "На Android 8–11 (API ≤ 30) поиск BLE и Bluetooth Classic адаптеров требует включённой службы местоположения (GPS/Геолокация) в шторке системы.",
+                                color = Amber,
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
+                    }
+                }
+
+                scanError?.let {
+                    Text("Ошибка: $it", color = Red, style = MaterialTheme.typography.bodyMedium)
+                }
+
+                Panel(title = "Доступные OBD2-адаптеры (${groups.availableObdAdapters.size})") {
+                    if (groups.availableObdAdapters.isEmpty() && !scanning) {
+                        Text(
+                            "Нажмите «Искать адаптеры» для поиска OBD2-устройств рядом. Ранее сопряжённые сторонние устройства скрыты в разделе ниже.",
+                            color = TextDim,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        groups.availableObdAdapters.forEach { adapter ->
+                            AdapterRow(
+                                adapter = adapter,
+                                scanMode = scanMode,
+                                onConnect = { forced -> vm.connectAdapter(adapter, forced) },
+                            )
+                        }
+                    }
+                }
+
+                if (groups.otherDevices.isNotEmpty()) {
+                    Panel(title = "Другие Bluetooth-устройства (${groups.otherDevices.size})") {
+                        OutlinedButton(
+                            onClick = { showOtherDevices = !showOtherDevices },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(if (showOtherDevices) "Скрыть другие устройства" else "Показать (${groups.otherDevices.size})")
+                        }
+                        if (showOtherDevices) {
+                            Spacer(Modifier.height(6.dp))
+                            LazyColumn(
+                                modifier = Modifier.fillMaxWidth().height((groups.otherDevices.size * 92).coerceAtMost(360).dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                items(groups.otherDevices, key = { it.mac }) { adapter ->
+                                    AdapterRow(
+                                        adapter = adapter,
+                                        scanMode = scanMode,
+                                        onConnect = { forced -> vm.connectAdapter(adapter, forced) },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         groups.lastUsedAdapter?.let { lastDisp ->
@@ -222,25 +484,6 @@ fun ConnectScreen(vm: ObdViewModel) {
             }
         }
 
-        Panel(title = "Доступные OBD2-адаптеры (${groups.availableObdAdapters.size})") {
-            if (groups.availableObdAdapters.isEmpty() && !scanning) {
-                Text(
-                    "Нажмите «Искать адаптеры» для поиска OBD2-устройств рядом. Ранее сопряжённые сторонние устройства скрыты в разделе ниже.",
-                    color = TextDim,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                groups.availableObdAdapters.forEach { adapter ->
-                    AdapterRow(
-                        adapter = adapter,
-                        scanMode = scanMode,
-                        onConnect = { forced -> vm.connectAdapter(adapter, forced) },
-                    )
-                }
-            }
-        }
-
         if (groups.savedAdapters.isNotEmpty()) {
             Panel(title = "Сохранённые адаптеры (${groups.savedAdapters.size})") {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -249,32 +492,6 @@ fun ConnectScreen(vm: ObdViewModel) {
                             display = savedDisp,
                             onConnect = { vm.connectSavedAdapter(savedDisp.saved) },
                         )
-                    }
-                }
-            }
-        }
-
-        if (groups.otherDevices.isNotEmpty()) {
-            Panel(title = "Другие Bluetooth-устройства (${groups.otherDevices.size})") {
-                OutlinedButton(
-                    onClick = { showOtherDevices = !showOtherDevices },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(if (showOtherDevices) "Скрыть другие устройства" else "Показать (${groups.otherDevices.size})")
-                }
-                if (showOtherDevices) {
-                    Spacer(Modifier.height(6.dp))
-                    LazyColumn(
-                        modifier = Modifier.fillMaxWidth().height((groups.otherDevices.size * 92).coerceAtMost(360).dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        items(groups.otherDevices, key = { it.mac }) { adapter ->
-                            AdapterRow(
-                                adapter = adapter,
-                                scanMode = scanMode,
-                                onConnect = { forced -> vm.connectAdapter(adapter, forced) },
-                            )
-                        }
                     }
                 }
             }
@@ -296,7 +513,13 @@ private fun SavedAdapterRow(
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(s.name, style = MaterialTheme.typography.titleMedium)
-                StatusChip(if (s.transport == BtTransportType.CLASSIC_SPP.name) "Classic" else "BLE", Primary)
+                val badge = when (s.transport) {
+                    BtTransportType.CLASSIC_SPP.name -> "Classic"
+                    BtTransportType.WIFI_TCP.name -> "Wi-Fi"
+                    BtTransportType.USB_SERIAL.name -> "USB"
+                    else -> "BLE"
+                }
+                StatusChip(badge, Primary)
                 if (display.isAvailableNow) {
                     StatusChip("Найден сейчас", Green)
                 }

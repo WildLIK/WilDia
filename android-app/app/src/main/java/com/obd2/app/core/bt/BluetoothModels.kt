@@ -8,6 +8,8 @@ import java.util.UUID
 enum class BtTransportType(val labelRu: String) {
     BLE("BLE"),
     CLASSIC_SPP("Classic (SPP)"),
+    WIFI_TCP("Wi-Fi (TCP)"),
+    USB_SERIAL("USB (OTG)"),
 }
 
 /** User-selectable scan & connection mode on the Connect/Diag screens. */

@@ -29,7 +29,7 @@ jobs:
         run: chmod +x gradlew
 
       - name: Run unit tests
-        run: ./gradlew :android-app:app:testDebugUnitTest --no-daemon
+        run: ./gradlew :android-app:app:testDebugUnitTest --no-daemon --max-workers=1
 
       - name: Upload test report on failure
         if: failure()
@@ -121,18 +121,31 @@ jobs:
           SIZE=$(stat -c%s "$OUT_DIR/$APK_NAME")
           RELEASED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           APK_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/${APK_NAME}"
-          cat > "$OUT_DIR/release-manifest.json" <<EOF
-          {
-            "versionCode": $VCODE,
-            "versionName": "$VNAME",
-            "changelog": "Release $TAG (versionCode $VCODE)",
-            "apkUrl": "$APK_URL",
-            "sizeBytes": $SIZE,
-            "sha256": "$SHA",
-            "minAndroidSdk": 26,
-            "releasedAt": "$RELEASED_AT"
+          TAG_NOTES=$(git tag -l --format='%(contents)' "$TAG" || true)
+          if [ -z "${TAG_NOTES// }" ]; then
+            TAG_NOTES="Release $TAG (versionCode $VCODE)"
+          fi
+          python3 - "$OUT_DIR/release-manifest.json" "$VCODE" "$VNAME" "$TAG_NOTES" "$APK_URL" "$SIZE" "$SHA" "$RELEASED_AT" <<'PYEOF'
+          import json, sys
+          out_path, vcode, vname, changelog, apk_url, size, sha, released_at = sys.argv[1:9]
+          data = {
+              "versionCode": int(vcode),
+              "versionName": vname,
+              "changelog": changelog.strip(),
+              "apkUrl": apk_url,
+              "sizeBytes": int(size),
+              "sha256": sha,
+              "minAndroidSdk": 26,
+              "releasedAt": released_at,
           }
-          EOF
+          with open(out_path, "w", encoding="utf-8") as f:
+              json.dump(data, f, ensure_ascii=False, indent=2)
+          PYEOF
+          {
+            echo "changelog<<EOF_CL"
+            printf '%s\n' "$TAG_NOTES"
+            echo "EOF_CL"
+          } >> "$GITHUB_OUTPUT"
           echo "out_dir=$OUT_DIR" >> "$GITHUB_OUTPUT"
           echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
 
@@ -148,6 +161,8 @@ jobs:
           draft: false
           prerelease: false
           body: |
+            ${{ steps.pkg.outputs.changelog }}
+
             SHA-256: `${{ steps.pkg.outputs.sha256 }}`
           files: |
             ${{ steps.pkg.outputs.out_dir }}/obd2-${{ github.ref_name }}-release.apk

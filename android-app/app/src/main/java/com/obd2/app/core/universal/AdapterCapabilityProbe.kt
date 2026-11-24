@@ -6,6 +6,8 @@ import com.obd2.app.core.elm327.Elm327Client
 enum class AdapterTransportKind {
     BLE,
     CLASSIC_SPP,
+    WIFI_TCP,
+    USB_SERIAL,
     DEMO,
     UNKNOWN,
 }
@@ -62,6 +64,8 @@ object AdapterCapabilityProbe {
             demoMode -> AdapterTransportKind.DEMO
             transportType == BtTransportType.BLE -> AdapterTransportKind.BLE
             transportType == BtTransportType.CLASSIC_SPP -> AdapterTransportKind.CLASSIC_SPP
+            transportType == BtTransportType.WIFI_TCP -> AdapterTransportKind.WIFI_TCP
+            transportType == BtTransportType.USB_SERIAL -> AdapterTransportKind.USB_SERIAL
             else -> AdapterTransportKind.UNKNOWN
         }
         val ident = elmInfo?.identity ?: elmInfo?.resetBanner
@@ -73,15 +77,14 @@ object AdapterCapabilityProbe {
             (pNum in listOf(4, 5))
 
         val elmDetected = !ident.isNullOrBlank() || demoMode
-        val isVgate = adapterName?.contains("Vlink", ignoreCase = true) == true ||
-            ident?.contains("ELM327", ignoreCase = true) == true
+        val factualHeaders = demoMode || (elmInfo?.supportsHeaders ?: elmDetected)
+        val factualCanAddressing = elmInfo?.supportsCanAddressing == true || demoMode
 
         val supportsStdObd = elmDetected && ecuResponding
-        val supportsHeaders = elmDetected && isCan && isVgate
-        // Read-only UDS over ISO-TP CAN is possible only when CAN is active and custom headers work;
-        // Classic SPP / specific clone adapters still require hardware verification.
-        val supportsUdsRead = supportsHeaders && isCan
-        // Generic ELM327 / Vgate iCar Pro does NOT guarantee VAG TP 2.0 channel framing without field verification
+        val supportsHeaders = elmDetected && isCan && factualHeaders
+        // Read-only UDS over ISO-TP CAN is possible only when CAN is active and AT headers/addressing actually succeed.
+        val supportsUdsRead = supportsHeaders && isCan && (factualCanAddressing || factualHeaders)
+        // Generic ELM327 / clone / Wi-Fi / USB adapters do NOT guarantee VAG TP 2.0 channel framing without field verification
         val supportsTp20 = false
         val supportsKLine = isKwp && elmDetected
 
@@ -92,8 +95,18 @@ object AdapterCapabilityProbe {
         if (!ecuResponding) {
             limits += "ЭБУ автомобиля не отвечает на стандартные OBD-II запросы."
         }
+        if (elmDetected && isCan && !factualHeaders) {
+            limits += "Адаптер не подтвердил поддержку ATH1/ATH0 (ограниченный клон ELM327 — разделение ЭБУ и UDS могут быть недоступны)."
+        }
+        elmInfo?.capabilityNotes?.forEach { limits += it }
         if (kind == AdapterTransportKind.CLASSIC_SPP) {
-            limits += "Bluetooth Classic SPP (Android-Vlink): совместимость требует подтверждения на реальном устройстве."
+            limits += "Bluetooth Classic SPP: совместимость зависит от профиля адаптера и магнитолы."
+        }
+        if (kind == AdapterTransportKind.WIFI_TCP) {
+            limits += "Wi-Fi TCP: убедитесь, что телефон/магнитола подключены к Wi-Fi точке адаптера."
+        }
+        if (kind == AdapterTransportKind.USB_SERIAL) {
+            limits += "USB Serial (OTG): поддерживаются только стандартные ELM327 UART-адаптеры (FTDI/CH340/CP210x/PL2303/CDC)."
         }
         if (!isCan) {
             limits += "Активный протокол не является CAN ISO 15765-4 — UDS и адресный CAN-опрос блоков недоступны."

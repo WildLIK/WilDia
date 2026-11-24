@@ -17,12 +17,19 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.obd2.app.BuildConfig
 import com.obd2.app.core.updates.ApkCheckResult
 import com.obd2.app.core.updates.ApkVerificationResult
@@ -41,6 +48,19 @@ fun AppUpdatesScreen(vm: ObdViewModel) {
     val verifyResult by vm.apkVerifyResult.collectAsState()
     val backupNotice by vm.backupNotice.collectAsState()
     val lastBackupFile by vm.lastBackupFile.collectAsState()
+    var canInstallPackages by remember { mutableStateOf(vm.canRequestPackageInstalls()) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    DisposableEffect(lifecycleOwner) {
+        val obs = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                canInstallPackages = vm.canRequestPackageInstalls()
+                vm.refreshPersistedApkUpdate()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
 
     Column(
         Modifier
@@ -124,7 +144,7 @@ fun AppUpdatesScreen(vm: ObdViewModel) {
                         color = Green,
                         style = MaterialTheme.typography.bodySmall,
                     )
-                    if (!vm.canRequestPackageInstalls()) {
+                    if (!canInstallPackages) {
                         Text(
                             "Android требует разрешить установку приложений из этого источника для Wildia.",
                             color = Amber,
@@ -164,7 +184,11 @@ fun AppUpdatesScreen(vm: ObdViewModel) {
 
         Panel(title = "Подпись и перенос данных") {
             Text(
-                "Текущие сборки подписаны debug-ключом. Обновление поверх без удаления данных возможно только с тем же ключом подписи. При переходе на постоянный release-ключ используйте резервную копию ниже.",
+                if (BuildConfig.DEBUG) {
+                    "Тестовая (debug) сборка: обновление поверх возможно только сборками с тем же debug-ключом. Для перехода на release-версию сначала создайте резервную копию ниже."
+                } else {
+                    "Установлена подписанная release-сборка Wildia. Последующие release-обновления с тем же ключом устанавливаются поверх с сохранением истории и профилей."
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = TextDim,
             )
