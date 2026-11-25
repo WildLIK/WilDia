@@ -111,7 +111,7 @@ class V051FeaturesTest {
 
             try {
                 val db1 = Room.databaseBuilder(ctx, AppDb::class.java, dbFile.absolutePath)
-                    .addMigrations(AppDb.MIGRATION_1_2, AppDb.MIGRATION_2_3, AppDb.MIGRATION_3_4, AppDb.MIGRATION_4_5, AppDb.MIGRATION_5_6)
+                    .addMigrations(*AppDb.ALL_MIGRATIONS)
                     .allowMainThreadQueries()
                     .build()
                 val recorder = TripRecorder(db1, flushIntervalMs = 0L, flushBatchSize = 1)
@@ -126,7 +126,7 @@ class V051FeaturesTest {
                 db1.close()
 
                 val db2 = Room.databaseBuilder(ctx, AppDb::class.java, dbFile.absolutePath)
-                    .addMigrations(AppDb.MIGRATION_1_2, AppDb.MIGRATION_2_3, AppDb.MIGRATION_3_4, AppDb.MIGRATION_4_5, AppDb.MIGRATION_5_6)
+                    .addMigrations(*AppDb.ALL_MIGRATIONS)
                     .allowMainThreadQueries()
                     .build()
                 try {
@@ -364,7 +364,7 @@ class V051FeaturesTest {
             helper.writableDatabase.close()
 
             val migrated = Room.databaseBuilder(ctx, AppDb::class.java, dbFile.absolutePath)
-                .addMigrations(AppDb.MIGRATION_1_2, AppDb.MIGRATION_2_3, AppDb.MIGRATION_3_4, AppDb.MIGRATION_4_5, AppDb.MIGRATION_5_6)
+                .addMigrations(*AppDb.ALL_MIGRATIONS)
                 .allowMainThreadQueries()
                 .build()
             try {

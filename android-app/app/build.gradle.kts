@@ -41,18 +41,21 @@ android {
 
     defaultConfig {
         applicationId = "com.obd2.app"
-        minSdk = 26
+        minSdk = 23
         targetSdk = 34
-        versionCode = 18
-        versionName = "0.5.8"
+        versionCode = 19
+        versionName = "0.6.0"
         buildConfigField("String", "APK_UPDATE_MANIFEST_URL", "\"\"")
         buildConfigField("String", "DB_UPDATE_MANIFEST_URL", "\"\"")
         buildConfigField("String", "UPDATE_GITHUB_REPO", "\"$githubRepoProp\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        resourceConfigurations += listOf("ru", "en")
     }
 
     signingConfigs {
         create("release") {
+            enableV1Signing = true
+            enableV2Signing = true
             if (hasReleaseSigning) {
                 storeFile = file(releaseStorePath!!)
                 storePassword = releaseStorePassword
@@ -64,7 +67,8 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             if (hasReleaseSigning) {
                 signingConfig = signingConfigs.getByName("release")

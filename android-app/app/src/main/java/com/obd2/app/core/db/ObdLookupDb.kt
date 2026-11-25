@@ -3,9 +3,11 @@ package com.obd2.app.core.db
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import android.util.LruCache
 import com.obd2.app.core.obd.PidDefinition
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 
 /**
  * Read-only bundled lookup database (assets/obd_data.db, schema v2).
@@ -21,6 +23,7 @@ import kotlinx.coroutines.withContext
 class ObdLookupDb(private val context: Context) {
 
     private var open: SQLiteDatabase? = null
+    private val dtcLookupCache = LruCache<String, List<DtcLookup>>(128)
 
     data class DbMeta(
         val version: String,
@@ -176,6 +179,7 @@ class ObdLookupDb(private val context: Context) {
                 sharedConnection?.first?.let { closeSharedConnection(it) }
                 writeMarker(dir, target.name)
                 cleanupStaleFiles(dir, target.name)
+                dtcLookupCache.evictAll()
                 true
             } catch (_: Exception) {
                 runCatching { target.delete() }
@@ -190,6 +194,7 @@ class ObdLookupDb(private val context: Context) {
         synchronized(ensureLock) {
             sharedConnection?.first?.let { closeSharedConnection(it) }
             runCatching { java.io.File(dir, "obd_data.version").delete() }
+            dtcLookupCache.evictAll()
             return runCatching {
                 copyAssetAndOpen(dir)
                 true
@@ -277,6 +282,7 @@ class ObdLookupDb(private val context: Context) {
                     closeSharedConnection(activeDatabasePathSafe(dir))
                     writeMarker(dir, f.name)
                     cleanupStaleFiles(dir, f.name)
+                    dtcLookupCache.evictAll()
                     return@withContext null
                 } catch (e: Exception) {
                     runCatching { f.delete() }
@@ -339,6 +345,12 @@ class ObdLookupDb(private val context: Context) {
     }
 
     suspend fun allPids(): List<PidDefinition> = withContext(Dispatchers.IO) {
+        val dir = context.getDatabasePath("lookup").parentFile ?: context.filesDir
+        val marker = readMarker(dir)
+        val alreadyExtracted = marker != null && java.io.File(dir, marker).exists()
+        if (!alreadyExtracted) {
+            loadPidsFromSeedAsset()?.let { return@withContext it }
+        }
         val db = ensure()
         val out = ArrayList<PidDefinition>(200)
         db.rawQuery(
@@ -366,6 +378,32 @@ class ObdLookupDb(private val context: Context) {
         }
         out
     }
+
+    private fun loadPidsFromSeedAsset(): List<PidDefinition>? = runCatching {
+        val raw = context.assets.open("pids_seed.json").bufferedReader(Charsets.UTF_8).use { it.readText() }
+        val arr = JSONArray(raw)
+        val out = ArrayList<PidDefinition>(arr.length())
+        for (i in 0 until arr.length()) {
+            val o = arr.getJSONObject(i)
+            out.add(
+                PidDefinition(
+                    mode = o.getInt("mode"),
+                    pid = o.getInt("pid"),
+                    nameEn = o.getString("nameEn"),
+                    nameRu = if (o.isNull("nameRu")) null else o.optString("nameRu"),
+                    unit = if (o.isNull("unit")) null else o.optString("unit"),
+                    bytes = if (o.isNull("bytes")) null else o.getInt("bytes"),
+                    decoder = o.getString("decoder"),
+                    weight = if (o.isNull("weight")) null else o.optString("weight"),
+                    mult = if (o.isNull("mult")) null else o.getDouble("mult"),
+                    offset = if (o.isNull("offset")) null else o.getDouble("offset"),
+                    formula = if (o.isNull("formula")) null else o.optString("formula"),
+                    category = if (o.isNull("category")) "other" else o.optString("category", "other"),
+                ),
+            )
+        }
+        out
+    }.getOrNull()
 
     /** Catalog of parameter definitions (PIDs, DID, VAG info) for display. */
     data class ParamCatalogEntry(
@@ -440,118 +478,185 @@ class ObdLookupDb(private val context: Context) {
         val longDescription: String? get() = detailEn
     }
 
+    private data class DtcBaseRow(
+        val code: String,
+        val maker: String,
+        val standard: String,
+        val titleEn: String,
+        val detailEn: String?,
+        val severity: String?,
+        val severityReason: String?,
+        val mil: Int?,
+        val limpPossible: Int?,
+        val titleRu: String?,
+        val translationStatus: String?,
+        val detailRu: String?,
+        val recommendationsRu: String?,
+        val relatedRaw: String?,
+        val source: String,
+    )
+
     private fun queryDtcs(db: SQLiteDatabase, where: String, args: Array<String>, limit: Int?): List<DtcLookup> {
         val lim = limit?.toString() ?: "-1"
-        val out = ArrayList<DtcLookup>()
-            db.rawQuery(
-                "SELECT d.code, d.manufacturer_id, d.standard, d.title_en, d.long_desc_en, " +
-                    "d.severity, d.severity_reason, d.mil, d.limp_mode_possible, " +
-                    "t.title_ru, t.translation_status, t.detail_ru, " +
-                    "t.recommendations_ru, d.related_codes, d.source_id " +
-                    "FROM dtc_definitions d " +
-                    "LEFT JOIN dtc_translations t ON t.code=d.code AND t.manufacturer_id=d.manufacturer_id " +
-                    "AND t.standard=d.standard AND t.lang='ru' " +
-                    "WHERE $where ORDER BY (d.manufacturer_id='GENERIC') DESC, d.manufacturer_id " +
-                    "LIMIT $lim",
-                args,
-            ).use { c ->
+        val baseRows = ArrayList<DtcBaseRow>()
+        db.rawQuery(
+            "SELECT d.code, d.manufacturer_id, d.standard, d.title_en, d.long_desc_en, " +
+                "d.severity, d.severity_reason, d.mil, d.limp_mode_possible, " +
+                "t.title_ru, t.translation_status, t.detail_ru, " +
+                "t.recommendations_ru, d.related_codes, d.source_id " +
+                "FROM dtc_definitions d " +
+                "LEFT JOIN dtc_translations t ON t.code=d.code AND t.manufacturer_id=d.manufacturer_id " +
+                "AND t.standard=d.standard AND t.lang='ru' " +
+                "WHERE $where ORDER BY (d.manufacturer_id='GENERIC') DESC, d.manufacturer_id " +
+                "LIMIT $lim",
+            args,
+        ).use { c ->
             while (c.moveToNext()) {
-                val code = c.getString(0)
-                val maker = c.getString(1)
-                val standard = c.getString(2)
-                val causes = ArrayList<String>()
-                val causeStatuses = ArrayList<String>()
-                db.rawQuery(
-                    "SELECT ct.text_ru, ct.translation_status, pc.text_en, pc.likelihood " +
-                        "FROM dtc_probable_causes pc " +
-                        "LEFT JOIN dtc_cause_translations ct ON ct.code=pc.code AND ct.manufacturer_id=pc.manufacturer_id " +
-                        "AND ct.standard=pc.standard AND ct.ord=pc.ord AND ct.lang='ru' " +
-                        "WHERE pc.code=? AND pc.manufacturer_id=? AND pc.standard=? " +
-                        "ORDER BY pc.ord LIMIT 8",
-                    arrayOf(code, maker, standard),
-                ).use { cc ->
-                    while (cc.moveToNext()) {
-                        val ru = if (cc.isNull(0)) null else cc.getString(0)
-                        val en = cc.getString(2)
-                        val lik = if (cc.isNull(3)) "" else cc.getString(3)
-                        val text = ru ?: en ?: continue
-                        val likLabel = when (lik.trim().lowercase()) {
-                            "high" -> "справочная причина: частая"
-                            "medium" -> "справочная причина: возможная"
-                            "low" -> "справочная причина: редкая"
-                            "" -> ""
-                            else -> "справочная причина"
-                        }
-                        causes.add(if (likLabel.isNotBlank()) "$text ($likLabel)" else text)
-                        causeStatuses.add(if (ru != null) (cc.getString(1) ?: "auto") else "en")
-                    }
-                }
-                val symptoms = ArrayList<String>()
-                val symptomStatuses = ArrayList<String>()
-                db.rawQuery(
-                    "SELECT st.text_ru, st.translation_status, sy.text_en " +
-                        "FROM dtc_symptoms sy " +
-                        "LEFT JOIN dtc_symptom_translations st ON st.code=sy.code AND st.manufacturer_id=sy.manufacturer_id " +
-                        "AND st.standard=sy.standard AND st.ord=sy.ord AND st.lang='ru' " +
-                        "WHERE sy.code=? AND sy.manufacturer_id=? AND sy.standard=? " +
-                        "ORDER BY sy.ord LIMIT 8",
-                    arrayOf(code, maker, standard),
-                ).use { cc ->
-                    while (cc.moveToNext()) {
-                        val ru = if (cc.isNull(0)) null else cc.getString(0)
-                        val text = ru ?: cc.getString(2) ?: continue
-                        symptoms.add(text)
-                        symptomStatuses.add(if (ru != null) (cc.getString(1) ?: "auto") else "en")
-                    }
-                }
-                val checks = ArrayList<String>()
-                db.rawQuery(
-                    "SELECT text_ru FROM dtc_checks WHERE code=? AND manufacturer_id=? AND standard=? ORDER BY ord",
-                    arrayOf(code, maker, standard),
-                ).use { cc ->
-                    while (cc.moveToNext()) checks.add(cc.getString(0))
-                }
-                val related = if (c.isNull(13)) emptyList() else {
-                    try {
-                        val arr = org.json.JSONArray(c.getString(13))
-                        (0 until arr.length()).mapNotNull { i -> arr.optString(i).takeIf { it.isNotBlank() } }
-                    } catch (e: Exception) {
-                        emptyList()
-                    }
-                }
-                out.add(
-                    DtcLookup(
-                        code = code,
-                        scope = maker,
-                        standard = standard,
+                baseRows.add(
+                    DtcBaseRow(
+                        code = c.getString(0),
+                        maker = c.getString(1),
+                        standard = c.getString(2),
                         titleEn = c.getString(3),
-                        titleRu = if (c.isNull(9)) null else c.getString(9),
-                        translationStatus = if (c.isNull(10)) null else c.getString(10),
                         detailEn = if (c.isNull(4)) null else c.getString(4),
-                        detailRu = if (c.isNull(11)) null else c.getString(11),
-                        recommendationsRu = if (c.isNull(12)) null else c.getString(12),
                         severity = if (c.isNull(5)) null else c.getString(5),
                         severityReason = if (c.isNull(6)) null else c.getString(6),
                         mil = if (c.isNull(7)) null else c.getInt(7),
                         limpPossible = if (c.isNull(8)) null else c.getInt(8),
-                        causes = causes,
-                        causeStatuses = causeStatuses,
-                        symptoms = symptoms,
-                        symptomStatuses = symptomStatuses,
-                        checks = checks,
-                        relatedCodes = related,
+                        titleRu = if (c.isNull(9)) null else c.getString(9),
+                        translationStatus = if (c.isNull(10)) null else c.getString(10),
+                        detailRu = if (c.isNull(11)) null else c.getString(11),
+                        recommendationsRu = if (c.isNull(12)) null else c.getString(12),
+                        relatedRaw = if (c.isNull(13)) null else c.getString(13),
                         source = if (c.isNull(14)) "?" else c.getString(14),
-                        groupTag = if (maker in VAG_SCOPES) "VAG" else "",
                     ),
                 )
             }
+        }
+        if (baseRows.isEmpty()) return emptyList()
+
+        val keySet = baseRows.mapTo(HashSet(baseRows.size * 2)) { Triple(it.code, it.maker, it.standard) }
+        val distinctCodes = baseRows.map { it.code }.distinct()
+
+        val causesMap = HashMap<Triple<String, String, String>, Pair<MutableList<String>, MutableList<String>>>()
+        val symptomsMap = HashMap<Triple<String, String, String>, Pair<MutableList<String>, MutableList<String>>>()
+        val checksMap = HashMap<Triple<String, String, String>, MutableList<String>>()
+
+        for (chunk in distinctCodes.chunked(250)) {
+            val placeholders = chunk.joinToString(",") { "?" }
+            val codeArgs = chunk.toTypedArray()
+
+            db.rawQuery(
+                "SELECT pc.code, pc.manufacturer_id, pc.standard, ct.text_ru, ct.translation_status, pc.text_en, pc.likelihood " +
+                    "FROM dtc_probable_causes pc " +
+                    "LEFT JOIN dtc_cause_translations ct ON ct.code=pc.code AND ct.manufacturer_id=pc.manufacturer_id " +
+                    "AND ct.standard=pc.standard AND ct.ord=pc.ord AND ct.lang='ru' " +
+                    "WHERE pc.code IN ($placeholders) ORDER BY pc.code, pc.manufacturer_id, pc.standard, pc.ord",
+                codeArgs,
+            ).use { cc ->
+                while (cc.moveToNext()) {
+                    val key = Triple(cc.getString(0), cc.getString(1), cc.getString(2))
+                    if (key !in keySet) continue
+                    val pair = causesMap.getOrPut(key) { ArrayList<String>() to ArrayList() }
+                    if (pair.first.size >= 8) continue
+                    val ru = if (cc.isNull(3)) null else cc.getString(3)
+                    val en = cc.getString(5)
+                    val lik = if (cc.isNull(6)) "" else cc.getString(6)
+                    val text = ru ?: en ?: continue
+                    val likLabel = when (lik.trim().lowercase()) {
+                        "high" -> "справочная причина: частая"
+                        "medium" -> "справочная причина: возможная"
+                        "low" -> "справочная причина: редкая"
+                        "" -> ""
+                        else -> "справочная причина"
+                    }
+                    pair.first.add(if (likLabel.isNotBlank()) "$text ($likLabel)" else text)
+                    pair.second.add(if (ru != null) (cc.getString(4) ?: "auto") else "en")
+                }
+            }
+
+            db.rawQuery(
+                "SELECT sy.code, sy.manufacturer_id, sy.standard, st.text_ru, st.translation_status, sy.text_en " +
+                    "FROM dtc_symptoms sy " +
+                    "LEFT JOIN dtc_symptom_translations st ON st.code=sy.code AND st.manufacturer_id=sy.manufacturer_id " +
+                    "AND st.standard=sy.standard AND st.ord=sy.ord AND st.lang='ru' " +
+                    "WHERE sy.code IN ($placeholders) ORDER BY sy.code, sy.manufacturer_id, sy.standard, sy.ord",
+                codeArgs,
+            ).use { cc ->
+                while (cc.moveToNext()) {
+                    val key = Triple(cc.getString(0), cc.getString(1), cc.getString(2))
+                    if (key !in keySet) continue
+                    val pair = symptomsMap.getOrPut(key) { ArrayList<String>() to ArrayList() }
+                    if (pair.first.size >= 8) continue
+                    val ru = if (cc.isNull(3)) null else cc.getString(3)
+                    val text = ru ?: cc.getString(5) ?: continue
+                    pair.first.add(text)
+                    pair.second.add(if (ru != null) (cc.getString(4) ?: "auto") else "en")
+                }
+            }
+
+            db.rawQuery(
+                "SELECT code, manufacturer_id, standard, text_ru FROM dtc_checks " +
+                    "WHERE code IN ($placeholders) ORDER BY code, manufacturer_id, standard, ord",
+                codeArgs,
+            ).use { cc ->
+                while (cc.moveToNext()) {
+                    val key = Triple(cc.getString(0), cc.getString(1), cc.getString(2))
+                    if (key !in keySet) continue
+                    checksMap.getOrPut(key) { ArrayList() }.add(cc.getString(3))
+                }
+            }
+        }
+
+        val out = ArrayList<DtcLookup>(baseRows.size)
+        for (r in baseRows) {
+            val key = Triple(r.code, r.maker, r.standard)
+            val causesPair = causesMap[key]
+            val symptomsPair = symptomsMap[key]
+            val related = if (r.relatedRaw == null) emptyList() else {
+                try {
+                    val arr = org.json.JSONArray(r.relatedRaw)
+                    (0 until arr.length()).mapNotNull { i -> arr.optString(i).takeIf { it.isNotBlank() } }
+                } catch (_: Exception) {
+                    emptyList()
+                }
+            }
+            out.add(
+                DtcLookup(
+                    code = r.code,
+                    scope = r.maker,
+                    standard = r.standard,
+                    titleEn = r.titleEn,
+                    titleRu = r.titleRu,
+                    translationStatus = r.translationStatus,
+                    detailEn = r.detailEn,
+                    detailRu = r.detailRu,
+                    recommendationsRu = r.recommendationsRu,
+                    severity = r.severity,
+                    severityReason = r.severityReason,
+                    mil = r.mil,
+                    limpPossible = r.limpPossible,
+                    causes = causesPair?.first ?: emptyList(),
+                    causeStatuses = causesPair?.second ?: emptyList(),
+                    symptoms = symptomsPair?.first ?: emptyList(),
+                    symptomStatuses = symptomsPair?.second ?: emptyList(),
+                    checks = checksMap[key] ?: emptyList(),
+                    relatedCodes = related,
+                    source = r.source,
+                    groupTag = if (r.maker in VAG_SCOPES) "VAG" else "",
+                ),
+            )
         }
         return out
     }
 
     suspend fun lookupDtc(code: String): List<DtcLookup> = withContext(Dispatchers.IO) {
+        val norm = code.uppercase()
+        dtcLookupCache.get(norm)?.let { return@withContext it }
         val db = ensure()
-        queryDtcs(db, "d.code=?", arrayOf(code.uppercase()), null)
+        val res = queryDtcs(db, "d.code=?", arrayOf(norm), null)
+        dtcLookupCache.put(norm, res)
+        res
     }
 
     /** Search by code prefix / description text (RU+EN), limited rows. */

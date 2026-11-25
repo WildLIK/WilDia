@@ -32,7 +32,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.obd2.app.core.ble.BleScanner
 import com.obd2.app.core.bt.BtScanMode
 import com.obd2.app.core.bt.BtTransportType
@@ -66,21 +66,21 @@ private enum class ConnectModeTab {
 @Composable
 fun ConnectScreen(vm: ObdViewModel) {
     val ctx = LocalContext.current
-    val adapters by vm.adapters.collectAsState()
-    val scanning by vm.scanning.collectAsState()
-    val scanMode by vm.scanMode.collectAsState()
-    val scanPhase by vm.scanPhase.collectAsState()
-    val scanError by vm.scanError.collectAsState()
-    val connection by vm.connection.collectAsState()
-    val pipeline by vm.pipelineStatus.collectAsState()
-    val lastAdapter by vm.lastAdapter.collectAsState()
-    val savedAdapters by vm.savedAdapters.collectAsState()
-    val settings by vm.settingsFlow.collectAsState()
-    val wifiStatus by vm.wifiNetworkStatus.collectAsState()
-    val wifiProbing by vm.wifiProbing.collectAsState()
-    val wifiEndpoints by vm.wifiFoundEndpoints.collectAsState()
-    val usbDevices by vm.usbDevices.collectAsState()
-    val usbStatusMsg by vm.usbStatusMessage.collectAsState()
+    val adapters by vm.adapters.collectAsStateWithLifecycle()
+    val scanning by vm.scanning.collectAsStateWithLifecycle()
+    val scanMode by vm.scanMode.collectAsStateWithLifecycle()
+    val scanPhase by vm.scanPhase.collectAsStateWithLifecycle()
+    val scanError by vm.scanError.collectAsStateWithLifecycle()
+    val connection by vm.connection.collectAsStateWithLifecycle()
+    val pipeline by vm.pipelineStatus.collectAsStateWithLifecycle()
+    val lastAdapter by vm.lastAdapter.collectAsStateWithLifecycle()
+    val savedAdapters by vm.savedAdapters.collectAsStateWithLifecycle()
+    val settings by vm.settingsFlow.collectAsStateWithLifecycle()
+    val wifiStatus by vm.wifiNetworkStatus.collectAsStateWithLifecycle()
+    val wifiProbing by vm.wifiProbing.collectAsStateWithLifecycle()
+    val wifiEndpoints by vm.wifiFoundEndpoints.collectAsStateWithLifecycle()
+    val usbDevices by vm.usbDevices.collectAsStateWithLifecycle()
+    val usbStatusMsg by vm.usbStatusMessage.collectAsStateWithLifecycle()
 
     var activeTab by remember { mutableStateOf(ConnectModeTab.BLUETOOTH) }
     var wifiHost by remember(settings.lastWifiHost) { mutableStateOf(settings.lastWifiHost) }

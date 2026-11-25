@@ -335,7 +335,7 @@ class ObdViewModel(
 
     // ---- Wi-Fi TCP ELM327 ----
     private val _wifiNetworkStatus = MutableStateFlow(
-        com.obd2.app.core.wifi.WifiNetworkBinder.inspectStatus(app.applicationContext),
+        com.obd2.app.core.wifi.WifiNetworkStatus(wifiNetworkAvailable = false),
     )
     val wifiNetworkStatus: StateFlow<com.obd2.app.core.wifi.WifiNetworkStatus> = _wifiNetworkStatus
 
@@ -865,10 +865,10 @@ class ObdViewModel(
     private val _chartViewingRecordingId = MutableStateFlow<Long?>(null)
     val chartViewingRecordingId: StateFlow<Long?> = _chartViewingRecordingId
 
-    private val _dbTrackStates = MutableStateFlow(repo.dbUpdater.getAllStates())
+    private val _dbTrackStates = MutableStateFlow<List<com.obd2.app.core.updates.TrackState>>(emptyList())
     val dbTrackStates: StateFlow<List<com.obd2.app.core.updates.TrackState>> = _dbTrackStates
 
-    private val _dbUpdateHistory = MutableStateFlow(repo.dbUpdater.getHistory())
+    private val _dbUpdateHistory = MutableStateFlow<List<com.obd2.app.core.updates.UpdateHistoryEntry>>(emptyList())
     val dbUpdateHistory: StateFlow<List<com.obd2.app.core.updates.UpdateHistoryEntry>> = _dbUpdateHistory
 
     private val _updateCheckMessage = MutableStateFlow<String?>(null)
@@ -1010,9 +1010,7 @@ class ObdViewModel(
     }
 
     // ---- v0.5.2 Online DTC Search & APK Updates ----
-    private val _dtcSearchCards = MutableStateFlow<List<com.obd2.app.core.search.DtcDiagnosticCard>>(
-        repo.dtcSearchCache.allCached(),
-    )
+    private val _dtcSearchCards = MutableStateFlow<List<com.obd2.app.core.search.DtcDiagnosticCard>>(emptyList())
     val dtcSearchCards: StateFlow<List<com.obd2.app.core.search.DtcDiagnosticCard>> = _dtcSearchCards
 
     private val _dtcSearchRunning = MutableStateFlow(false)
@@ -1157,6 +1155,15 @@ class ObdViewModel(
             .onFailure {
                 _backupNotice.value = "Ошибка восстановления: ${it.message}"
             }
+    }
+
+    init {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            _wifiNetworkStatus.value = com.obd2.app.core.wifi.WifiNetworkBinder.inspectStatus(getApplication())
+            _dbTrackStates.value = repo.dbUpdater.getAllStates()
+            _dbUpdateHistory.value = repo.dbUpdater.getHistory()
+            _dtcSearchCards.value = repo.dtcSearchCache.allCached()
+        }
     }
 }
 

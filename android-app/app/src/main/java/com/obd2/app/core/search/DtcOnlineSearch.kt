@@ -156,9 +156,17 @@ class PersistentDtcSearchCache(
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val file: File by lazy { File(context.filesDir, "dtc_search_cache.json") }
     private val entries = LinkedHashMap<String, DtcDiagnosticCard>()
+    private var loaded = false
 
-    init {
+    private fun ensureLoadedLocked() {
+        if (loaded) return
+        loaded = true
         loadFromDisk()
+    }
+
+    /** Preloads disk cache on a background thread. */
+    fun preload() {
+        synchronized(this) { ensureLoadedLocked() }
     }
 
     private fun key(req: DtcSearchRequest): String =
@@ -166,20 +174,24 @@ class PersistentDtcSearchCache(
 
     @Synchronized
     fun get(req: DtcSearchRequest, nowMs: Long = System.currentTimeMillis()): DtcDiagnosticCard? {
+        ensureLoadedLocked()
         val card = entries[key(req)] ?: return null
         if (nowMs - card.fetchedAtMs > ttlMs) return null
         return card.copy(fromCache = true)
     }
 
     @Synchronized
-    fun getAnyCached(code: String, manufacturer: String? = null): DtcDiagnosticCard? =
-        entries.entries.firstOrNull { (k, c) ->
+    fun getAnyCached(code: String, manufacturer: String? = null): DtcDiagnosticCard? {
+        ensureLoadedLocked()
+        return entries.entries.firstOrNull { (k, c) ->
             c.code.equals(code, ignoreCase = true) &&
                 (manufacturer.isNullOrBlank() || k.contains("|$manufacturer|", ignoreCase = true))
         }?.value?.copy(fromCache = true)
+    }
 
     @Synchronized
     fun put(req: DtcSearchRequest, card: DtcDiagnosticCard) {
+        ensureLoadedLocked()
         entries[key(req)] = card
         while (entries.size > 150) {
             val first = entries.keys.firstOrNull() ?: break
@@ -189,7 +201,10 @@ class PersistentDtcSearchCache(
     }
 
     @Synchronized
-    fun allCached(): List<DtcDiagnosticCard> = entries.values.toList().sortedByDescending { it.fetchedAtMs }
+    fun allCached(): List<DtcDiagnosticCard> {
+        ensureLoadedLocked()
+        return entries.values.toList().sortedByDescending { it.fetchedAtMs }
+    }
 
     @Synchronized
     private fun loadFromDisk() {

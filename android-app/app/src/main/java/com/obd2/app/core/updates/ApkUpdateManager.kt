@@ -32,7 +32,7 @@ data class ApkReleaseManifest(
     val apkUrl: String,
     val sizeBytes: Long = 0L,
     val sha256: String,
-    val minAndroidSdk: Int = 26,
+    val minAndroidSdk: Int = 23,
     val releasedAt: String = "",
 )
 
@@ -328,10 +328,15 @@ class ApkUpdateManager(
                     if (code !in 200..299 && code != HttpURLConnection.HTTP_PARTIAL) {
                         throw IllegalStateException("HTTP $code при скачивании APK")
                     }
-                    val total = if (resumeAccepted) {
-                        manifest.sizeBytes.takeIf { it > 0 } ?: (existingOffset + conn.contentLengthLong.coerceAtLeast(0L))
+                    val connLength = if (Build.VERSION.SDK_INT >= 24) {
+                        conn.contentLengthLong
                     } else {
-                        conn.contentLengthLong.takeIf { it > 0 } ?: manifest.sizeBytes
+                        conn.getHeaderField("Content-Length")?.toLongOrNull() ?: conn.contentLength.toLong()
+                    }
+                    val total = if (resumeAccepted) {
+                        manifest.sizeBytes.takeIf { it > 0 } ?: (existingOffset + connLength.coerceAtLeast(0L))
+                    } else {
+                        connLength.takeIf { it > 0 } ?: manifest.sizeBytes
                     }
                     var downloaded = if (resumeAccepted) existingOffset else 0L
                     conn.inputStream.use { input ->
@@ -384,7 +389,11 @@ class ApkUpdateManager(
         expectedSignerSha256Override: String? = null,
     ): ApkVerificationResult {
         val pm = context.packageManager
-        val flags = PackageManager.GET_SIGNING_CERTIFICATES or PackageManager.GET_SIGNATURES
+        val flags = if (Build.VERSION.SDK_INT >= 28) {
+            PackageManager.GET_SIGNING_CERTIFICATES or PackageManager.GET_SIGNATURES
+        } else {
+            PackageManager.GET_SIGNATURES
+        }
         val archiveInfo: PackageInfo = pm.getPackageArchiveInfo(apkFile.absolutePath, flags)
             ?: return ApkVerificationResult.Rejected("Скачанный файл не является корректным Android APK.").also {
                 apkFile.delete()
@@ -445,7 +454,11 @@ class ApkUpdateManager(
     @Suppress("DEPRECATION")
     private fun installedSignerSha256(): String? = runCatching {
         val pm = context.packageManager
-        val flags = PackageManager.GET_SIGNING_CERTIFICATES or PackageManager.GET_SIGNATURES
+        val flags = if (Build.VERSION.SDK_INT >= 28) {
+            PackageManager.GET_SIGNING_CERTIFICATES or PackageManager.GET_SIGNATURES
+        } else {
+            PackageManager.GET_SIGNATURES
+        }
         val info = pm.getPackageInfo(context.packageName, flags)
         extractSignerSha256(info)
     }.getOrNull()

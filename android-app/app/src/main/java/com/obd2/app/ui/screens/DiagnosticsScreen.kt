@@ -24,7 +24,6 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -32,6 +31,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.obd2.app.Screen
 import androidx.compose.ui.text.font.FontFamily
@@ -60,16 +60,16 @@ private enum class DtcCategoryTab(val labelRu: String) {
 
 @Composable
 fun DiagnosticsScreen(vm: ObdViewModel, nav: NavHostController? = null) {
-    val connection by vm.connection.collectAsState()
-    val pipeline by vm.pipelineStatus.collectAsState()
-    val currentDtcState by vm.currentDtcState.collectAsState()
-    val dtcScanRuns by vm.dtcScanRuns.collectAsState()
+    val connection by vm.connection.collectAsStateWithLifecycle()
+    val pipeline by vm.pipelineStatus.collectAsStateWithLifecycle()
+    val currentDtcState by vm.currentDtcState.collectAsStateWithLifecycle()
+    val dtcScanRuns by vm.dtcScanRuns.collectAsStateWithLifecycle()
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
-    val reading by vm.readingDtcs.collectAsState()
-    val sessions by vm.sessions.collectAsState()
-    val currentSessionId by vm.currentSessionIdFlow.collectAsState()
-    val openedSaved by vm.openedSavedSession.collectAsState()
-    val lastCrash by vm.lastCrash.collectAsState()
+    val reading by vm.readingDtcs.collectAsStateWithLifecycle()
+    val sessions by vm.sessions.collectAsStateWithLifecycle()
+    val currentSessionId by vm.currentSessionIdFlow.collectAsStateWithLifecycle()
+    val openedSaved by vm.openedSavedSession.collectAsStateWithLifecycle()
+    val lastCrash by vm.lastCrash.collectAsStateWithLifecycle()
 
     var includeIdentifiers by remember { mutableStateOf(false) }
     var exportFeedback by remember { mutableStateOf<String?>(null) }
@@ -80,7 +80,7 @@ fun DiagnosticsScreen(vm: ObdViewModel, nav: NavHostController? = null) {
     val connected = connection is DiagnosticRepository.ConnectionState.Connected && pipeline.ecuResponding
 
     sessionPendingDelete?.let { target ->
-        val df = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault())
+        val df = remember { SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()) }
         AlertDialog(
             onDismissRequest = { sessionPendingDelete = null },
             title = { Text("Удалить сеанс диагностики?") },
@@ -270,10 +270,10 @@ fun DiagnosticsScreen(vm: ObdViewModel, nav: NavHostController? = null) {
         }
 
         if (dtcScanRuns.isNotEmpty()) {
+            val runTimeDf = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
             Panel(title = "Журнал прогонов Mode 03/07/0A (${dtcScanRuns.size})") {
                 dtcScanRuns.take(8).forEach { run ->
-                    val tsStr = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
-                        .format(java.util.Date(run.timestampMs))
+                    val tsStr = runTimeDf.format(Date(run.timestampMs))
                     val allCodes = (run.storedCodes + run.pendingCodes + run.permanentCodes).distinct()
                     val codeText = if (allCodes.isEmpty()) "кодов нет" else allCodes.joinToString(", ")
                     val color = when (run.status) {

@@ -84,10 +84,15 @@ class TelemetryChartBuffer(
     ) {
         unsupported.clear()
         unsupported.addAll(unsupportedPids)
+        val regByPid = if (registry.isNotEmpty()) registry else emptyList()
         for ((pid, ok) in live) {
-            val def = registry.firstOrNull { it.mode == 1 && it.pid == pid }
-            metaName[pid] = def?.displayName ?: "PID %02X".format(pid)
-            metaUnit[pid] = ok.reading.unit ?: def?.unit ?: ""
+            if (!metaName.containsKey(pid) || !metaUnit.containsKey(pid) || ok.reading.unit != null) {
+                val def = regByPid.firstOrNull { it.mode == 1 && it.pid == pid }
+                if (!metaName.containsKey(pid)) {
+                    metaName[pid] = def?.displayName ?: "PID %02X".format(pid)
+                }
+                metaUnit[pid] = ok.reading.unit ?: metaUnit[pid] ?: def?.unit ?: ""
+            }
             val v = ok.reading.value ?: continue
             val q = series.getOrPut(pid) { ArrayDeque() }
             val last = q.lastOrNull()
@@ -123,6 +128,47 @@ class TelemetryChartBuffer(
         unsupported.clear()
     }
 
+    private fun sliceDeque(
+        q: ArrayDeque<ChartSample>,
+        window: ChartTimeWindow,
+        scrollFraction: Float,
+        nowMs: Long,
+    ): List<ChartSample> {
+        if (q.isEmpty()) return emptyList()
+        val effectiveEnd = frozenAtMs ?: maxOf(nowMs, q.last().timestampMs)
+        var endExclusive = q.size
+        while (endExclusive > 0 && q[endExclusive - 1].timestampMs > effectiveEnd) {
+            endExclusive--
+        }
+        if (endExclusive == 0) return emptyList()
+
+        var startIdx = 0
+        if (window != ChartTimeWindow.ALL) {
+            val minTs = q[0].timestampMs
+            val maxTs = q[endExclusive - 1].timestampMs
+            val span = (maxTs - minTs).coerceAtLeast(0L)
+            if (span > window.durationMs) {
+                val maxStart = maxTs - window.durationMs
+                val clamped = scrollFraction.coerceIn(0f, 1f)
+                val startTs = minTs + ((maxStart - minTs) * clamped).toLong()
+                val endTs = startTs + window.durationMs
+                while (startIdx < endExclusive && q[startIdx].timestampMs < startTs) {
+                    startIdx++
+                }
+                while (endExclusive > startIdx && q[endExclusive - 1].timestampMs > endTs) {
+                    endExclusive--
+                }
+            }
+        }
+        val count = endExclusive - startIdx
+        if (count <= 0) return emptyList()
+        val out = ArrayList<ChartSample>(count)
+        for (i in startIdx until endExclusive) {
+            out.add(q[i])
+        }
+        return out
+    }
+
     @Synchronized
     fun samplesFor(
         pid: Int,
@@ -130,22 +176,81 @@ class TelemetryChartBuffer(
         scrollFraction: Float = 1f, // 0f = oldest, 1f = newest
         nowMs: Long = System.currentTimeMillis(),
     ): List<ChartSample> {
-        val all = series[pid]?.toList().orEmpty()
-        if (all.isEmpty()) return emptyList()
-        val effectiveEnd = frozenAtMs ?: maxOf(nowMs, all.last().timestampMs)
-        val filtered = all.filter { it.timestampMs <= effectiveEnd }
-        if (window == ChartTimeWindow.ALL || filtered.isEmpty()) return filtered
+        val q = series[pid] ?: return emptyList()
+        return sliceDeque(q, window, scrollFraction, nowMs)
+    }
 
-        val minTs = filtered.first().timestampMs
-        val maxTs = filtered.last().timestampMs
-        val span = (maxTs - minTs).coerceAtLeast(0L)
-        if (span <= window.durationMs) return filtered
+    /**
+     * Single-pass stats + downsampled points for Compose rendering (caps vertices at [maxRenderPoints]
+     * via min-max bucketing while computing exact stats over all points in the window).
+     */
+    @Synchronized
+    fun snapshotForChart(
+        pid: Int,
+        registry: List<PidDefinition>,
+        window: ChartTimeWindow = ChartTimeWindow.ALL,
+        scrollFraction: Float = 1f,
+        maxRenderPoints: Int = 240,
+        nowMs: Long = System.currentTimeMillis(),
+    ): Pair<PidSeriesStats, List<ChartSample>> {
+        val name = metaName[pid] ?: registry.firstOrNull { it.mode == 1 && it.pid == pid }?.displayName ?: "PID %02X".format(pid)
+        val unit = metaUnit[pid] ?: registry.firstOrNull { it.mode == 1 && it.pid == pid }?.unit ?: ""
+        val q = series[pid]
+        val pts = if (q == null || pid in unsupported) emptyList() else sliceDeque(q, window, scrollFraction, nowMs)
+        if (pts.isEmpty()) {
+            return PidSeriesStats(pid, name, unit, null, null, null, null, 0, available = false) to emptyList()
+        }
+        var minV = Double.POSITIVE_INFINITY
+        var maxV = Double.NEGATIVE_INFINITY
+        var sum = 0.0
+        for (p in pts) {
+            if (p.value < minV) minV = p.value
+            if (p.value > maxV) maxV = p.value
+            sum += p.value
+        }
+        val stats = PidSeriesStats(
+            pid = pid,
+            nameRu = name,
+            unit = unit,
+            min = minV,
+            avg = sum / pts.size,
+            max = maxV,
+            latest = pts.last().value,
+            count = pts.size,
+            available = true,
+        )
+        return stats to downsampleMinMax(pts, maxRenderPoints)
+    }
 
-        val maxStart = maxTs - window.durationMs
-        val clamped = scrollFraction.coerceIn(0f, 1f)
-        val startTs = minTs + ((maxStart - minTs) * clamped).toLong()
-        val endTs = startTs + window.durationMs
-        return filtered.filter { it.timestampMs in startTs..endTs }
+    private fun downsampleMinMax(pts: List<ChartSample>, maxPoints: Int): List<ChartSample> {
+        if (pts.size <= maxPoints || maxPoints < 4) return pts
+        val buckets = (maxPoints - 2) / 2
+        if (buckets <= 0) return pts
+        val out = ArrayList<ChartSample>(maxPoints)
+        out.add(pts.first())
+        val innerSize = pts.size - 2
+        val step = innerSize.toDouble() / buckets.toDouble()
+        for (b in 0 until buckets) {
+            val s = 1 + (b * step).toInt()
+            val e = (1 + ((b + 1) * step).toInt()).coerceAtMost(pts.size - 1)
+            if (s >= e) continue
+            var minP = pts[s]
+            var maxP = pts[s]
+            for (i in s + 1 until e) {
+                val p = pts[i]
+                if (p.value < minP.value) minP = p
+                if (p.value > maxP.value) maxP = p
+            }
+            if (minP.timestampMs <= maxP.timestampMs) {
+                out.add(minP)
+                if (maxP !== minP) out.add(maxP)
+            } else {
+                out.add(maxP)
+                out.add(minP)
+            }
+        }
+        out.add(pts.last())
+        return out
     }
 
     @Synchronized

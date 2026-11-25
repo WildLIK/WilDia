@@ -18,7 +18,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -26,6 +25,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.obd2.app.core.bt.BtScanMode
 import com.obd2.app.core.diag.DiagRunner
 import com.obd2.app.core.diag.DiagSeverity
@@ -44,7 +44,7 @@ import java.io.File
  */
 @Composable
 fun DiagScreen(vm: ObdViewModel) {
-    val state by vm.diagRunner.state.collectAsState()
+    val state by vm.diagRunner.state.collectAsStateWithLifecycle()
     var scenario by remember { mutableStateOf(DiagRunner.Scenario.D_FULL) }
     var diagScanMode by remember { mutableStateOf(BtScanMode.AUTO) }
     var maskIds by remember { mutableStateOf(true) }

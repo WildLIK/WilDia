@@ -13,16 +13,9 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ListAlt
-import androidx.compose.material.icons.filled.Bluetooth
-import androidx.compose.material.icons.filled.DirectionsCar
-import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Speed
-import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -40,8 +33,8 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -49,7 +42,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -75,6 +72,7 @@ import com.obd2.app.ui.screens.SettingsScreen
 import com.obd2.app.ui.screens.TripRecordingsScreen
 import com.obd2.app.ui.screens.UpdatesScreen
 import com.obd2.app.ui.screens.VehicleScreen
+import com.obd2.app.ui.theme.AppIcons
 import com.obd2.app.ui.theme.Obd2Theme
 import kotlinx.coroutines.launch
 
@@ -113,14 +111,14 @@ enum class Screen(val route: String, val title: String) {
     val icon: ImageVector?
         get() = when (this) {
             HOME -> Icons.Filled.Home
-            CONNECT -> Icons.Filled.Bluetooth
-            DIAGNOSTICS, QUICK_DIAG, EXTENDED_DIAG -> Icons.Filled.WarningAmber
-            SENSORS, CHARTS -> Icons.Filled.Speed
-            ALLPIDS, RECORDINGS -> Icons.Filled.Memory
-            DTCBASE, DTC_SEARCH, DIAG -> Icons.AutoMirrored.Filled.ListAlt
-            VEHICLE -> Icons.Filled.DirectionsCar
-            ADAPTER, FULLCHECK -> Icons.Filled.Tune
-            OMVL_SKY -> Icons.Filled.Speed
+            CONNECT -> AppIcons.Bluetooth
+            DIAGNOSTICS, QUICK_DIAG, EXTENDED_DIAG -> AppIcons.WarningAmber
+            SENSORS, CHARTS -> AppIcons.Speed
+            ALLPIDS, RECORDINGS -> AppIcons.Memory
+            DTCBASE, DTC_SEARCH, DIAG -> AppIcons.ListAlt
+            VEHICLE -> AppIcons.DirectionsCar
+            ADAPTER, FULLCHECK -> AppIcons.Tune
+            OMVL_SKY -> AppIcons.Speed
             SETTINGS, UPDATES, APP_UPDATES -> Icons.Filled.Settings
         }
 
@@ -157,10 +155,23 @@ fun ObdAppRoot(vm: ObdViewModel = viewModel()) {
     val nav = rememberNavController()
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    val lifecycleOwner = LocalLifecycleOwner.current
     val backStack by nav.currentBackStackEntryAsState()
     val current = backStack?.destination?.route ?: Screen.HOME.route
     val isWideScreen = LocalConfiguration.current.screenWidthDp >= 600
     val startElapsed = remember { android.os.SystemClock.elapsedRealtime() }
+
+    DisposableEffect(lifecycleOwner, vm) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> vm.repo.setUiForeground(true)
+                Lifecycle.Event.ON_STOP -> vm.repo.setUiForeground(false)
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     LaunchedEffect(Unit) {
         val dt = android.os.SystemClock.elapsedRealtime() - startElapsed
@@ -233,9 +244,6 @@ fun ObdAppRoot(vm: ObdViewModel = viewModel()) {
                 }
             },
         ) { padding ->
-            val conn by vm.connection.collectAsState()
-            val demoActive = (conn as? com.obd2.app.core.repo.DiagnosticRepository.ConnectionState.Connected)?.demo == true ||
-                (conn as? com.obd2.app.core.repo.DiagnosticRepository.ConnectionState.Connecting)?.demo == true
             Row(Modifier.padding(padding)) {
                 if (isWideScreen) {
                     NavigationRail(modifier = Modifier.fillMaxHeight()) {
@@ -252,19 +260,7 @@ fun ObdAppRoot(vm: ObdViewModel = viewModel()) {
                     }
                 }
                 Column(Modifier.weight(1f)) {
-                if (demoActive) {
-                    androidx.compose.material3.Surface(
-                        color = com.obd2.app.ui.theme.Amber.copy(alpha = 0.22f),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(
-                            "ДЕМО — данные симулированы (не реальный автомобиль)",
-                            color = com.obd2.app.ui.theme.Amber,
-                            style = MaterialTheme.typography.labelLarge,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                        )
-                    }
-                }
+                DemoModeBanner(vm)
                 NavHost(
                     navController = nav,
                     startDestination = Screen.HOME.route,
@@ -292,6 +288,26 @@ fun ObdAppRoot(vm: ObdViewModel = viewModel()) {
                 }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun DemoModeBanner(vm: ObdViewModel) {
+    val conn by vm.connection.collectAsStateWithLifecycle()
+    val demoActive = (conn as? com.obd2.app.core.repo.DiagnosticRepository.ConnectionState.Connected)?.demo == true ||
+        (conn as? com.obd2.app.core.repo.DiagnosticRepository.ConnectionState.Connecting)?.demo == true
+    if (demoActive) {
+        androidx.compose.material3.Surface(
+            color = com.obd2.app.ui.theme.Amber.copy(alpha = 0.22f),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(
+                "ДЕМО — данные симулированы (не реальный автомобиль)",
+                color = com.obd2.app.ui.theme.Amber,
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+            )
         }
     }
 }

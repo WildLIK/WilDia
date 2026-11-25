@@ -16,10 +16,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.obd2.app.Screen
 import com.obd2.app.core.bt.BtTransportType
@@ -33,20 +34,20 @@ import com.obd2.app.ui.theme.TextDim
 
 @Composable
 fun HomeScreen(vm: ObdViewModel, nav: NavHostController) {
-    val connection by vm.connection.collectAsState()
-    val pipeline by vm.pipelineStatus.collectAsState()
-    val isPolling by vm.isPolling.collectAsState()
-    val live by vm.liveData.collectAsState()
-    val unsupportedPids by vm.unsupportedPids.collectAsState()
-    val settings by vm.settingsFlow.collectAsState()
-    val profiles by vm.profiles.collectAsState()
-    val activeProfileId by vm.activeProfileId.collectAsState()
-    val sessionVehicle by vm.sessionVehicle.collectAsState()
-    val sessions by vm.sessions.collectAsState()
-    val currentSessionId by vm.currentSessionIdFlow.collectAsState()
-    val elmInfo by vm.elmInfo.collectAsState()
-    val stats by vm.elmStats.collectAsState()
-    val lastAdapter by vm.lastAdapter.collectAsState()
+    val connection by vm.connection.collectAsStateWithLifecycle()
+    val pipeline by vm.pipelineStatus.collectAsStateWithLifecycle()
+    val isPolling by vm.isPolling.collectAsStateWithLifecycle()
+    val live by vm.liveData.collectAsStateWithLifecycle()
+    val unsupportedPids by vm.unsupportedPids.collectAsStateWithLifecycle()
+    val settings by vm.settingsFlow.collectAsStateWithLifecycle()
+    val profiles by vm.profiles.collectAsStateWithLifecycle()
+    val activeProfileId by vm.activeProfileId.collectAsStateWithLifecycle()
+    val sessionVehicle by vm.sessionVehicle.collectAsStateWithLifecycle()
+    val sessions by vm.sessions.collectAsStateWithLifecycle()
+    val currentSessionId by vm.currentSessionIdFlow.collectAsStateWithLifecycle()
+    val elmInfo by vm.elmInfo.collectAsStateWithLifecycle()
+    val stats by vm.elmStats.collectAsStateWithLifecycle()
+    val lastAdapter by vm.lastAdapter.collectAsStateWithLifecycle()
 
     val scroll = rememberScrollState()
     Column(
@@ -56,9 +57,9 @@ fun HomeScreen(vm: ObdViewModel, nav: NavHostController) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-    val registryError by vm.registryError.collectAsState()
-    val storageError by vm.storageError.collectAsState()
-    val lastCrash by vm.lastCrash.collectAsState()
+    val registryError by vm.registryError.collectAsStateWithLifecycle()
+    val storageError by vm.storageError.collectAsStateWithLifecycle()
+    val lastCrash by vm.lastCrash.collectAsStateWithLifecycle()
 
     if (storageError != null) {
         Panel(title = "Ошибка хранилища данных") {
@@ -126,9 +127,9 @@ fun HomeScreen(vm: ObdViewModel, nav: NavHostController) {
             } else {
                 KeyValue("Ручной профиль", "не выбран")
             }
+            val historyDf = remember { java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale.getDefault()) }
             val lastSavedText = if (lastSavedSession != null) {
-                val df = java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale.getDefault())
-                "${lastSavedSession.displayVehicleTitle()} (${df.format(java.util.Date(lastSavedSession.startedAtMs))}, ошибок: ${lastSavedSession.totalDtcCount})"
+                "${lastSavedSession.displayVehicleTitle()} (${historyDf.format(java.util.Date(lastSavedSession.startedAtMs))}, ошибок: ${lastSavedSession.totalDtcCount})"
             } else {
                 "нет сохранённых сеансов"
             }
@@ -206,9 +207,9 @@ fun HomeScreen(vm: ObdViewModel, nav: NavHostController) {
             ) {
                 val la = lastAdapter!!
                 val transportTxt = if (la.transport == BtTransportType.CLASSIC_SPP.name) "Classic SPP" else "BLE"
+                val adapterDf = remember { java.text.SimpleDateFormat("dd.MM HH:mm", java.util.Locale.getDefault()) }
                 val tsStr = if (la.lastConnectedAtMs > 0L) {
-                    java.text.SimpleDateFormat("dd.MM HH:mm", java.util.Locale.getDefault())
-                        .format(java.util.Date(la.lastConnectedAtMs))
+                    adapterDf.format(java.util.Date(la.lastConnectedAtMs))
                 } else "ранее"
                 Spacer(Modifier.height(8.dp))
                 KeyValue("Последний адаптер", "${la.name} ($transportTxt)")

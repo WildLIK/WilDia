@@ -98,6 +98,7 @@ class ClassicBluetoothTransport(
 
     @Volatile private var activeStream: ClassicSocketStream? = null
     private var readerJob: Job? = null
+    private var reconnectJob: Job? = null
 
     private val scanner by lazy { ClassicBluetoothScanner(context, log) }
     private val connector: ClassicSocketConnector by lazy {
@@ -217,7 +218,8 @@ class ClassicBluetoothTransport(
                 if (!userClosed.get() && isActive) {
                     log.log(RawLog.Dir.ERROR, "[CLASSIC] read error: ${e.message}")
                     closeStreamQuietly()
-                    handleUnexpectedDrop(e.message ?: "Разрыв RFCOMM-соединения")
+                    val reason = e.message ?: "Разрыв RFCOMM-соединения"
+                    reconnectJob = scope.launch { handleUnexpectedDrop(reason) }
                 }
             }
         }
@@ -257,6 +259,9 @@ class ClassicBluetoothTransport(
 
     override suspend fun disconnect() {
         userClosed.set(true)
+        reconnecting.set(false)
+        reconnectJob?.cancel()
+        reconnectJob = null
         readerJob?.cancel()
         readerJob = null
         closeStreamQuietly()

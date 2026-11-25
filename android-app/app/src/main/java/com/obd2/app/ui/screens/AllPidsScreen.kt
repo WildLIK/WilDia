@@ -21,7 +21,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -29,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.obd2.app.ui.catalog.PidCatalog
 import com.obd2.app.ui.ObdViewModel
 import com.obd2.app.ui.theme.Amber
@@ -48,12 +48,12 @@ private enum class PidFilter(val label: String) { AVAILABLE("Доступные"
  */
 @Composable
 fun AllPidsScreen(vm: ObdViewModel) {
-    val registry by vm.pidRegistry.collectAsState()
-    val support by vm.support.collectAsState()
-    val repoSupported by vm.supportedPids.collectAsState()
-    val rawRead by vm.rawRead.collectAsState()
-    val connection by vm.connection.collectAsState()
-    val settings by vm.settingsFlow.collectAsState()
+    val registry by vm.pidRegistry.collectAsStateWithLifecycle()
+    val support by vm.support.collectAsStateWithLifecycle()
+    val repoSupported by vm.supportedPids.collectAsStateWithLifecycle()
+    val rawRead by vm.rawRead.collectAsStateWithLifecycle()
+    val connection by vm.connection.collectAsStateWithLifecycle()
+    val settings by vm.settingsFlow.collectAsStateWithLifecycle()
 
     val supportedSet: Set<Int>? = support?.supportedPids?.toSet() ?: repoSupported
 
@@ -118,24 +118,26 @@ fun AllPidsScreen(vm: ObdViewModel) {
             }
         }
 
-        val allMode01 = registry.filter { it.mode == 1 }
-        val mode09 = registry.filter { it.mode == 9 }
-        val filtered = allMode01
-            .filter { PidCatalog.categoryFor(it) == category }
-            .filter { def ->
-                when (filter) {
-                    PidFilter.AVAILABLE -> supportedSet?.contains(def.pid) == true
-                    PidFilter.FAVORITES -> favorites.contains(PidCatalog.hex(def))
-                    PidFilter.ALL -> true
+        val mode09 = remember(registry) { registry.filter { it.mode == 9 } }
+        val filtered = remember(registry, category, filter, supportedSet, favorites, query) {
+            val q = query.trim()
+            registry.asSequence()
+                .filter { it.mode == 1 && PidCatalog.categoryFor(it) == category }
+                .filter { def ->
+                    when (filter) {
+                        PidFilter.AVAILABLE -> supportedSet?.contains(def.pid) == true
+                        PidFilter.FAVORITES -> favorites.contains(PidCatalog.hex(def))
+                        PidFilter.ALL -> true
+                    }
                 }
-            }
-            .filter { def ->
-                val q = query.trim()
-                if (q.isEmpty()) true
-                else (def.nameRu ?: def.nameEn).contains(q, ignoreCase = true) ||
-                    def.nameEn.contains(q, ignoreCase = true) ||
-                    "%02X".format(def.pid).contains(q, ignoreCase = true)
-            }
+                .filter { def ->
+                    if (q.isEmpty()) true
+                    else (def.nameRu ?: def.nameEn).contains(q, ignoreCase = true) ||
+                        def.nameEn.contains(q, ignoreCase = true) ||
+                        "%02X".format(def.pid).contains(q, ignoreCase = true)
+                }
+                .toList()
+        }
 
         LazyColumn(
             modifier = Modifier.fillMaxWidth().weight(1f),

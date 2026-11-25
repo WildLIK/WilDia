@@ -9,7 +9,9 @@ import com.obd2.app.core.repo.DiagnosticRepository
 import com.obd2.app.core.repo.FullCheckRunner
 import com.obd2.app.core.repo.SettingsRepository
 import com.obd2.app.core.report.DiagnosticReportBuilder
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 
 /**
  * Simple manual dependency container.
@@ -50,6 +52,9 @@ class AppContainer(private val context: Context) {
     init {
         lastCrash.value = DiagLog.readCrash(context)
         DiagLog.clearCrash(context)
+        repository.ioScope.launch(Dispatchers.IO) {
+            diagSession.journal.preload()
+        }
     }
 
     fun acknowledgeCrash() {

@@ -365,7 +365,7 @@ class V057MultiTransportAndUpdaterTest {
             val dbFile = File(tmpDir, "v057_upg_${System.nanoTime()}.db")
             val db1 = Room.databaseBuilder(ctx(), AppDb::class.java, dbFile.absolutePath)
                 .setJournalMode(androidx.room.RoomDatabase.JournalMode.TRUNCATE)
-                .addMigrations(AppDb.MIGRATION_1_2, AppDb.MIGRATION_2_3, AppDb.MIGRATION_3_4, AppDb.MIGRATION_4_5, AppDb.MIGRATION_5_6)
+                .addMigrations(*AppDb.ALL_MIGRATIONS)
                 .build()
             val sid = db1.sessionDao().insertSession(
                 SessionEntity(
@@ -412,7 +412,7 @@ class V057MultiTransportAndUpdaterTest {
             // Re-open Room DB (simulating app update / cold restart)
             val db2 = Room.databaseBuilder(ctx(), AppDb::class.java, dbFile.absolutePath)
                 .setJournalMode(androidx.room.RoomDatabase.JournalMode.TRUNCATE)
-                .addMigrations(AppDb.MIGRATION_1_2, AppDb.MIGRATION_2_3, AppDb.MIGRATION_3_4, AppDb.MIGRATION_4_5, AppDb.MIGRATION_5_6)
+                .addMigrations(*AppDb.ALL_MIGRATIONS)
                 .build()
             try {
                 val restoredSessions = db2.sessionDao().allSessions().first()

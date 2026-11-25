@@ -1,0 +1,25 @@
+# Startup and hot UI paths for Wildia
+Lcom/obd2/app/ObdApp;
+Lcom/obd2/app/MainActivity;
+Lcom/obd2/app/MainActivityKt;
+Lcom/obd2/app/Screen;
+Lcom/obd2/app/di/AppContainer;
+Lcom/obd2/app/ui/ObdViewModel;
+Lcom/obd2/app/ui/ObdViewModel$*;
+Lcom/obd2/app/ui/theme/AppIcons;
+Lcom/obd2/app/ui/theme/ThemeKt;
+Lcom/obd2/app/core/repo/DiagnosticRepository;
+Lcom/obd2/app/core/repo/DiagnosticRepository$*;
+Lcom/obd2/app/core/repo/SettingsRepository;
+Lcom/obd2/app/core/db/AppDb;
+Lcom/obd2/app/core/db/AppDb_Impl;
+Lcom/obd2/app/core/db/ObdLookupDb;
+Lcom/obd2/app/core/elm/Elm327Client;
+Lcom/obd2/app/core/obd/ObdClient;
+Lcom/obd2/app/core/obd/PidDecoder;
+Lcom/obd2/app/core/telemetry/TelemetryChartBuffer;
+Lcom/obd2/app/ui/screens/HomeScreenKt;
+Lcom/obd2/app/ui/screens/ConnectScreenKt;
+Lcom/obd2/app/ui/screens/SensorsScreenKt;
+Lcom/obd2/app/ui/screens/ChartsScreenKt;
+Lcom/obd2/app/ui/screens/DiagnosticsScreenKt;

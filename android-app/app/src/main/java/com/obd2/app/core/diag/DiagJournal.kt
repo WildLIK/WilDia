@@ -24,44 +24,59 @@ class DiagJournal(
 ) {
     private val lock = Any()
     private val mem = ArrayDeque<DiagEvent>()
-    private var spillFile: File
+    private var spillFile: File = File(baseDir, "events_current.jsonl")
     private var spillWriter: java.io.FileWriter? = null
     private var spillSize = 0L
+    private var spillSinceFlush = 0
+    private var initialized = false
 
-    val snapshotsDir: File = File(baseDir, "snapshots").apply { mkdirs() }
-    private val crashDir: File = File(baseDir, "crash").apply { mkdirs() }
+    val snapshotsDir: File by lazy { File(baseDir, "snapshots").apply { mkdirs() } }
+    private val crashDir: File by lazy { File(baseDir, "crash").apply { mkdirs() } }
 
-    init {
+    private fun ensureInitializedLocked() {
+        if (initialized) return
+        initialized = true
         baseDir.mkdirs()
-        spillFile = File(baseDir, "events_current.jsonl")
-        // restore tail from a previous run so a crash keeps its evidence
         restoreTailFromSpill()
+    }
+
+    /** Preloads persisted journal tail on a background I/O thread without blocking app startup. */
+    fun preload() {
+        synchronized(lock) { ensureInitializedLocked() }
     }
 
     fun add(event: DiagEvent) {
         synchronized(lock) {
+            ensureInitializedLocked()
             mem.addLast(event)
             while (mem.size > maxEvents || (mem.size > 1 && event.ts - mem.first().ts > windowMs)) {
                 mem.removeFirst()
             }
             spill(event)
             if (event.severity == DiagSeverity.ERROR) {
+                runCatching { spillWriter?.flush() }
+                spillSinceFlush = 0
                 writeSnapshot("error", "событие ERROR: ${event.op}: ${event.details ?: ""}")
             }
         }
     }
 
     fun snapshot(windowMsOverride: Long? = null): List<DiagEvent> = synchronized(lock) {
+        ensureInitializedLocked()
         val cutoff = System.currentTimeMillis() - (windowMsOverride ?: windowMs)
         mem.filter { it.ts >= cutoff }
     }
 
-    fun allInMemory(): List<DiagEvent> = synchronized(lock) { mem.toList() }
+    fun allInMemory(): List<DiagEvent> = synchronized(lock) {
+        ensureInitializedLocked()
+        mem.toList()
+    }
 
     /** Writes a snapshot file; returns its path. Existing files are never overwritten. */
     private var snapshotSeq = 0
 
     fun writeSnapshot(kind: String, description: String): File = synchronized(lock) {
+        ensureInitializedLocked()
         val ts = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())
         snapshotSeq += 1
         val f = File(snapshotsDir, "${kind}_${ts}_${snapshotSeq}.json")
@@ -74,6 +89,7 @@ class DiagJournal(
     /** Called from the crash handler: persists events + crash info. */
     fun persistCrash(threadName: String, stackTrace: String) {
         synchronized(lock) {
+            ensureInitializedLocked()
             val ts = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())
             val f = File(crashDir, "crash_$ts.jsonl")
             f.bufferedWriter().use { w ->
@@ -101,10 +117,15 @@ class DiagJournal(
     fun readLastCrashJsonl(): File? =
         crashDir.listFiles { file -> file.name.startsWith("crash_") }?.maxByOrNull { it.name }
 
-    fun spillFile(): File = spillFile
+    fun spillFile(): File = synchronized(lock) {
+        ensureInitializedLocked()
+        runCatching { spillWriter?.flush() }
+        spillSinceFlush = 0
+        spillFile
+    }
 
     fun close() {
-        synchronized(lock) { spillWriter?.flush(); spillWriter?.close(); spillWriter = null }
+        synchronized(lock) { spillWriter?.flush(); spillWriter?.close(); spillWriter = null; spillSinceFlush = 0 }
     }
 
     // ------------------------------------------------------------------ //
@@ -117,8 +138,12 @@ class DiagJournal(
             }
             val line = jsonLine(event) + "\n"
             spillWriter!!.append(line)
-            spillWriter!!.flush()
             spillSize += line.length
+            spillSinceFlush++
+            if (spillSinceFlush >= 16) {
+                spillWriter!!.flush()
+                spillSinceFlush = 0
+            }
             if (spillSize > maxSpillBytes) rotateSpill()
         } catch (_: Exception) {
             // diagnostics must never crash the app

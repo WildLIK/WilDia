@@ -18,7 +18,6 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,6 +29,7 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.obd2.app.BuildConfig
 import com.obd2.app.core.updates.ApkCheckResult
 import com.obd2.app.core.updates.ApkVerificationResult
@@ -42,12 +42,12 @@ import com.obd2.app.ui.theme.TextDim
 @Composable
 fun AppUpdatesScreen(vm: ObdViewModel) {
     val ctx = LocalContext.current
-    val settings by vm.settingsFlow.collectAsState()
-    val checkResult by vm.apkCheckResult.collectAsState()
-    val downloadProgress by vm.apkDownloadProgress.collectAsState()
-    val verifyResult by vm.apkVerifyResult.collectAsState()
-    val backupNotice by vm.backupNotice.collectAsState()
-    val lastBackupFile by vm.lastBackupFile.collectAsState()
+    val settings by vm.settingsFlow.collectAsStateWithLifecycle()
+    val checkResult by vm.apkCheckResult.collectAsStateWithLifecycle()
+    val downloadProgress by vm.apkDownloadProgress.collectAsStateWithLifecycle()
+    val verifyResult by vm.apkVerifyResult.collectAsStateWithLifecycle()
+    val backupNotice by vm.backupNotice.collectAsStateWithLifecycle()
+    val lastBackupFile by vm.lastBackupFile.collectAsStateWithLifecycle()
     var canInstallPackages by remember { mutableStateOf(vm.canRequestPackageInstalls()) }
     val lifecycleOwner = LocalLifecycleOwner.current
 

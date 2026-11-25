@@ -336,7 +336,7 @@ class UniversalCleanUiTest {
             helper.close()
 
             val upgradedDb = Room.databaseBuilder(ctx, AppDb::class.java, dbFile.absolutePath)
-                .addMigrations(AppDb.MIGRATION_1_2, AppDb.MIGRATION_2_3, AppDb.MIGRATION_3_4, AppDb.MIGRATION_4_5, AppDb.MIGRATION_5_6)
+                .addMigrations(*AppDb.ALL_MIGRATIONS)
                 .allowMainThreadQueries()
                 .build()
             try {

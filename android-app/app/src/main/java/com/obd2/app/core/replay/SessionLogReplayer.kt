@@ -61,7 +61,7 @@ class ReplayTransport(
         }
         val list = commandSequences[cmd]
         val reply = if (list != null && list.isNotEmpty()) {
-            val idx = counters.getOrDefault(cmd, 0)
+            val idx = counters[cmd] ?: 0
             counters[cmd] = idx + 1
             list[idx % list.size]
         } else {

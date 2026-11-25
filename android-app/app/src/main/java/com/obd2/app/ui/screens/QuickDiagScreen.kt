@@ -20,7 +20,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -28,6 +27,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.obd2.app.core.obd.ClearDtcGuard
 import com.obd2.app.core.obd.ClearDtcResult
 import com.obd2.app.core.repo.DiagnosticRepository
@@ -39,12 +39,12 @@ import com.obd2.app.ui.theme.TextDim
 
 @Composable
 fun QuickDiagScreen(vm: ObdViewModel) {
-    val connection by vm.connection.collectAsState()
-    val running by vm.quickDiagRunning.collectAsState()
-    val progress by vm.quickDiagProgress.collectAsState()
-    val result by vm.quickDiagResult.collectAsState()
-    val clearFeedback by vm.clearDtcFeedback.collectAsState()
-    val settings by vm.settingsFlow.collectAsState()
+    val connection by vm.connection.collectAsStateWithLifecycle()
+    val running by vm.quickDiagRunning.collectAsStateWithLifecycle()
+    val progress by vm.quickDiagProgress.collectAsStateWithLifecycle()
+    val result by vm.quickDiagResult.collectAsStateWithLifecycle()
+    val clearFeedback by vm.clearDtcFeedback.collectAsStateWithLifecycle()
+    val settings by vm.settingsFlow.collectAsStateWithLifecycle()
     var exportNotice by remember { mutableStateOf<String?>(null) }
     var showClearDialog by remember { mutableStateOf(false) }
 

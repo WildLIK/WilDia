@@ -20,7 +20,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -28,6 +27,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.obd2.app.core.lpg.omvl.OmvlDecodedValue
 import com.obd2.app.core.lpg.omvl.OmvlFieldConfidence
 import com.obd2.app.ui.ObdViewModel
@@ -42,9 +42,9 @@ import com.obd2.app.ui.theme.TextDim
 fun OmvlSkyScreen(vm: ObdViewModel) {
     val ctrl = vm.omvlSkyController
     val spp = vm.omvlSppManager
-    val state by ctrl.uiState.collectAsState()
-    val sppTarget by spp.selectedAdapter.collectAsState()
-    val sppState by spp.state.collectAsState()
+    val state by ctrl.uiState.collectAsStateWithLifecycle()
+    val sppTarget by spp.selectedAdapter.collectAsStateWithLifecycle()
+    val sppState by spp.state.collectAsStateWithLifecycle()
 
     LaunchedEffect(Unit) {
         ctrl.ensureLoaded()

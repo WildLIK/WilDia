@@ -19,13 +19,13 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.obd2.app.Screen
 import com.obd2.app.core.db.SessionStatus
@@ -51,8 +51,8 @@ private val recordablePids = listOf(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TripRecordingsScreen(vm: ObdViewModel, nav: NavHostController) {
-    val activeState by vm.tripRecordingState.collectAsState()
-    val recordings by vm.tripRecordings.collectAsState()
+    val activeState by vm.tripRecordingState.collectAsStateWithLifecycle()
+    val recordings by vm.tripRecordings.collectAsStateWithLifecycle()
     var selectedPids by remember { mutableStateOf(TelemetryChartBuffer.DEFAULT_CHART_PIDS) }
     var notice by remember { mutableStateOf<String?>(null) }
     val df = remember { SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale.getDefault()) }

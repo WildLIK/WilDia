@@ -160,7 +160,6 @@ CREATE TABLE dtc_definitions (
 ) WITHOUT ROWID;
 CREATE INDEX idx_dtc_code       ON dtc_definitions(code);
 CREATE INDEX idx_dtc_maker      ON dtc_definitions(manufacturer_id);
-CREATE INDEX idx_dtc_title_en   ON dtc_definitions(title_en);
 
 CREATE TABLE dtc_probable_causes (
     code            TEXT NOT NULL,
@@ -216,7 +215,6 @@ CREATE TABLE dtc_translations (
     FOREIGN KEY (code, manufacturer_id, standard)
         REFERENCES dtc_definitions(code, manufacturer_id, standard) ON DELETE CASCADE
 ) WITHOUT ROWID;
-CREATE INDEX idx_dtc_tr_title ON dtc_translations(title_ru);
 
 
 CREATE TABLE dtc_cause_translations (

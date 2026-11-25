@@ -15,7 +15,7 @@ import java.security.MessageDigest
 import java.security.PublicKey
 import java.security.Signature
 import java.security.spec.X509EncodedKeySpec
-import java.util.Base64
+import android.util.Base64
 
 enum class UpdateTrack(val dirName: String, val titleRu: String, val isSqlite: Boolean) {
     DTC_DB("dtc_db", "База кодов ошибок (DTC) и описаний", isSqlite = true),
@@ -76,7 +76,7 @@ object ManifestSignatureVerifier {
         "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEpG7N3A7N2vE3p0yA3h7J8V8sD1mK5uN8M2H0wH6R9z4z2n9Q8K3E2F7C5D6A8B1C2D3E4F5A6B7C8D9E0F1A=="
 
     fun verify(manifest: DbUpdateManifest, publicKey: PublicKey): Boolean = runCatching {
-        val sigBytes = Base64.getDecoder().decode(manifest.signatureBase64)
+        val sigBytes = Base64.decode(manifest.signatureBase64, Base64.DEFAULT)
         val sig = Signature.getInstance("SHA256withECDSA")
         sig.initVerify(publicKey)
         sig.update(manifest.canonicalPayload().toByteArray(Charsets.UTF_8))
@@ -84,7 +84,7 @@ object ManifestSignatureVerifier {
     }.getOrDefault(false)
 
     fun decodePublicKey(base64Spki: String): PublicKey {
-        val bytes = Base64.getDecoder().decode(base64Spki)
+        val bytes = Base64.decode(base64Spki, Base64.DEFAULT)
         return KeyFactory.getInstance("EC").generatePublic(X509EncodedKeySpec(bytes))
     }
 }

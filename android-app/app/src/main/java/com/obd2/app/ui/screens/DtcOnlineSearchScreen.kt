@@ -19,12 +19,13 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.obd2.app.ui.ObdViewModel
 import com.obd2.app.ui.theme.Accent
 import com.obd2.app.ui.theme.Amber
@@ -37,12 +38,12 @@ import java.util.Locale
 @Composable
 fun DtcOnlineSearchScreen(vm: ObdViewModel) {
     val ctx = LocalContext.current
-    val settings by vm.settingsFlow.collectAsState()
-    val cards by vm.dtcSearchCards.collectAsState()
-    val running by vm.dtcSearchRunning.collectAsState()
-    val notice by vm.dtcSearchNotice.collectAsState()
+    val settings by vm.settingsFlow.collectAsStateWithLifecycle()
+    val cards by vm.dtcSearchCards.collectAsStateWithLifecycle()
+    val running by vm.dtcSearchRunning.collectAsStateWithLifecycle()
+    val notice by vm.dtcSearchNotice.collectAsStateWithLifecycle()
     val readDtcs = vm.currentReadDtcRequests()
-    val df = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault())
+    val df = remember { SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()) }
 
     Column(
         Modifier

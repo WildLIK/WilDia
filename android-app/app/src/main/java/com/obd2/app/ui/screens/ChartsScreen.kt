@@ -22,7 +22,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -34,6 +33,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.obd2.app.core.telemetry.ChartPreset
 import com.obd2.app.core.telemetry.ChartSample
 import com.obd2.app.core.telemetry.ChartTimeWindow
@@ -65,14 +65,14 @@ private val seriesColors = listOf(Green, Accent, Amber, Red, Color(0xFFAB47BC), 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ChartsScreen(vm: ObdViewModel) {
-    val selectedPids by vm.selectedChartPids.collectAsState()
-    val viewingRecId by vm.chartViewingRecordingId.collectAsState()
-    val registry by vm.pidRegistry.collectAsState()
-    val settings by vm.settingsFlow.collectAsState()
+    val selectedPids by vm.selectedChartPids.collectAsStateWithLifecycle()
+    val viewingRecId by vm.chartViewingRecordingId.collectAsStateWithLifecycle()
+    val registry by vm.pidRegistry.collectAsStateWithLifecycle()
+    val settings by vm.settingsFlow.collectAsStateWithLifecycle()
     @Suppress("UNUSED_VARIABLE")
-    val tick by vm.chartTick.collectAsState()
-    val polling by vm.isPolling.collectAsState()
-    val connection by vm.connection.collectAsState()
+    val tick by vm.chartTick.collectAsStateWithLifecycle()
+    val polling by vm.isPolling.collectAsStateWithLifecycle()
+    val connection by vm.connection.collectAsStateWithLifecycle()
 
     var paused by remember { mutableStateOf(vm.chartBuffer.displayPaused) }
     var window by remember { mutableStateOf(ChartTimeWindow.MIN_5) }
@@ -179,13 +179,22 @@ fun ChartsScreen(vm: ObdViewModel) {
             }
         }
 
-        val unitGroups = vm.chartBuffer.groupByUnit(selectedPids, registry)
+        val unitGroups = remember(selectedPids, registry) {
+            vm.chartBuffer.groupByUnit(selectedPids, registry)
+        }
         unitGroups.forEach { group ->
             Panel(title = "График (${group.unit})") {
-                val seriesList = group.pids.mapIndexed { idx, pid ->
-                    val stats = vm.chartBuffer.statsFor(pid, registry, window, scrollFraction)
-                    val pts = vm.chartBuffer.samplesFor(pid, window, scrollFraction)
-                    Triple(stats, pts, seriesColors[idx % seriesColors.size])
+                val seriesList = remember(tick, group.pids, window, scrollFraction, registry) {
+                    group.pids.mapIndexed { idx, pid ->
+                        val (stats, pts) = vm.chartBuffer.snapshotForChart(
+                            pid = pid,
+                            registry = registry,
+                            window = window,
+                            scrollFraction = scrollFraction,
+                            maxRenderPoints = 240,
+                        )
+                        Triple(stats, pts, seriesColors[idx % seriesColors.size])
+                    }
                 }
                 val hasAnyData = seriesList.any { it.second.isNotEmpty() }
                 if (!hasAnyData) {
@@ -209,12 +218,24 @@ fun ChartsScreen(vm: ObdViewModel) {
 
 @Composable
 private fun MultiSeriesChartCanvas(series: List<Pair<List<ChartSample>, Color>>) {
-    val allPoints = series.flatMap { it.first }
-    if (allPoints.isEmpty()) return
-    val minT = allPoints.minOf { it.timestampMs }
-    val maxT = allPoints.maxOf { it.timestampMs }.coerceAtLeast(minT + 1L)
-    val minV = allPoints.minOf { it.value }
-    val maxV = allPoints.maxOf { it.value }.let { if (it <= minV) minV + 1.0 else it }
+    var minT = Long.MAX_VALUE
+    var maxT = Long.MIN_VALUE
+    var minV = Double.POSITIVE_INFINITY
+    var maxV = Double.NEGATIVE_INFINITY
+    var hasPoints = false
+    for ((pts, _) in series) {
+        for (p in pts) {
+            hasPoints = true
+            if (p.timestampMs < minT) minT = p.timestampMs
+            if (p.timestampMs > maxT) maxT = p.timestampMs
+            if (p.value < minV) minV = p.value
+            if (p.value > maxV) maxV = p.value
+        }
+    }
+    if (!hasPoints) return
+    val clampedMaxT = maxT.coerceAtLeast(minT + 1L)
+    val clampedMaxV = if (maxV <= minV) minV + 1.0 else maxV
+    val path = remember { Path() }
 
     Canvas(
         modifier = Modifier
@@ -223,6 +244,8 @@ private fun MultiSeriesChartCanvas(series: List<Pair<List<ChartSample>, Color>>)
     ) {
         val w = size.width
         val h = size.height
+        val tSpan = (clampedMaxT - minT).toFloat()
+        val vSpan = (clampedMaxV - minV)
         // Grid lines
         for (i in 0..2) {
             val y = h * i / 2f
@@ -230,10 +253,10 @@ private fun MultiSeriesChartCanvas(series: List<Pair<List<ChartSample>, Color>>)
         }
         for ((pts, color) in series) {
             if (pts.size < 2) continue
-            val path = Path()
+            path.reset()
             pts.forEachIndexed { idx, p ->
-                val x = ((p.timestampMs - minT).toFloat() / (maxT - minT).toFloat()) * w
-                val y = h - (((p.value - minV) / (maxV - minV)).toFloat() * (h - 8f) + 4f)
+                val x = ((p.timestampMs - minT).toFloat() / tSpan) * w
+                val y = h - (((p.value - minV) / vSpan).toFloat() * (h - 8f) + 4f)
                 if (idx == 0) path.moveTo(x, y) else path.lineTo(x, y)
             }
             drawPath(path, color = color, style = Stroke(width = 3f))

@@ -17,11 +17,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.obd2.app.core.repo.FullCheckRunner
 import com.obd2.app.ui.ObdViewModel
 import com.obd2.app.ui.theme.Amber
@@ -31,11 +31,11 @@ import com.obd2.app.ui.theme.TextDim
 
 @Composable
 fun FullCheckScreen(vm: ObdViewModel) {
-    val steps by vm.fullCheckSteps.collectAsState()
-    val running by vm.fullCheckRunning.collectAsState()
-    val result by vm.fullCheckResult.collectAsState()
-    val reportFile by vm.reportFile.collectAsState()
-    val reportError by vm.reportError.collectAsState()
+    val steps by vm.fullCheckSteps.collectAsStateWithLifecycle()
+    val running by vm.fullCheckRunning.collectAsStateWithLifecycle()
+    val result by vm.fullCheckResult.collectAsStateWithLifecycle()
+    val reportFile by vm.reportFile.collectAsStateWithLifecycle()
+    val reportError by vm.reportError.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     Column(

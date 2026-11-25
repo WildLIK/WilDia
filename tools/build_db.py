@@ -689,10 +689,11 @@ def main():
             causes.append(entry)
         tag = "VAG" if maker in VAG_MAKERS else ""
         try:
+            # Keep only columns needed by legacy v1 lookups/tests (full text lives in v2 tables).
             cur.execute("INSERT INTO dtc VALUES (?,?,?,?,?,?,?,?,?)",
-                        (code, maker, tag, title_en, title_ru,
-                         title_ru.lower() if title_ru else None, long_en,
-                         json.dumps(causes, ensure_ascii=False) if causes else None,
+                        (code, maker, tag, title_en, None,
+                         title_ru.lower() if title_ru else None, None,
+                         None,
                          source_id))
             n_legacy += 1
         except sqlite3.IntegrityError:

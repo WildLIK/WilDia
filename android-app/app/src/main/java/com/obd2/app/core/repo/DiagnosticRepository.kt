@@ -187,6 +187,10 @@ class DiagnosticRepository(
         private val DASHBOARD_PROBE_PIDS = listOf(
             0x0C, 0x0D, 0x05, 0x04, 0x42, 0x0F, 0x2F, 0x11, 0x10, 0x1F, 0x5C, 0x06, 0x07, 0x46, 0x0B, 0x0E,
         )
+        // Temperatures, fuel level and runtime change slowly over seconds/minutes, so polling them
+        // every 4th cycle when fast PIDs are active frees bus bandwidth for RPM/speed/load.
+        private val SLOW_POLL_PIDS = setOf(0x05, 0x0F, 0x46, 0x5C, 0x2F, 0x1F)
+        private const val SLOW_POLL_STRIDE = 4L
         private const val SENSOR_AUTOSAVE_INTERVAL_MS = 2500L
         const val DEFAULT_STALE_THRESHOLD_MS = 6000L
 
@@ -272,6 +276,16 @@ class DiagnosticRepository(
     private val _isPolling = MutableStateFlow(false)
     val isPolling: StateFlow<Boolean> = _isPolling
 
+    @Volatile
+    private var uiForeground: Boolean = true
+
+    @Volatile
+    private var lastChartTickEmitMs: Long = 0L
+
+    fun setUiForeground(foreground: Boolean) {
+        uiForeground = foreground
+    }
+
     private val _supportedPids = MutableStateFlow<Set<Int>?>(null)
     val supportedPids: StateFlow<Set<Int>?> = _supportedPids
 
@@ -282,6 +296,11 @@ class DiagnosticRepository(
 
     private val _pidRegistry = MutableStateFlow<List<PidDefinition>>(emptyList())
     val pidRegistry: StateFlow<List<PidDefinition>> = _pidRegistry
+
+    @Volatile
+    private var pidIndex: Map<Pair<Int, Int>, PidDefinition> = emptyMap()
+
+    internal fun findPidDef(mode: Int, pid: Int): PidDefinition? = pidIndex[mode to pid]
 
     /** Non-null when the bundled DB failed to load — surfaced in the UI. */
     private val _registryError = MutableStateFlow<String?>(null)
@@ -305,7 +324,15 @@ class DiagnosticRepository(
     val elmStats: StateFlow<Elm327Client.Stats?> = _elmStats
 
     val catalogManager = CompatibilityCatalogManager(context)
-    private val _catalogStatus = MutableStateFlow(catalogManager.status())
+    private val _catalogStatus = MutableStateFlow(
+        CatalogStatus(
+            activeVersion = "…",
+            schemaVersion = CompatibilityCatalogManager.SUPPORTED_SCHEMA_VERSION,
+            source = "bundled",
+            canRollback = false,
+            vehicleCount = 0,
+        ),
+    )
     val catalogStatus: StateFlow<CatalogStatus> = _catalogStatus
 
     private val _quickDiagResult = MutableStateFlow<QuickDiagnosticsResult?>(null)
@@ -331,7 +358,11 @@ class DiagnosticRepository(
         context = context,
         onTrackApplied = { track, file ->
             when (track) {
-                UpdateTrack.DTC_DB -> lookupDb.installVerifiedDatabase(file)
+                UpdateTrack.DTC_DB -> {
+                    lookupDb.installVerifiedDatabase(file).also { ok ->
+                        if (ok) invalidatePidRegistry()
+                    }
+                }
                 UpdateTrack.COMPATIBILITY_CATALOG -> {
                     val txt = file.readText(Charsets.UTF_8)
                     val sha = com.obd2.app.core.universal.CompatibilityCatalogManager.sha256Hex(txt)
@@ -347,6 +378,7 @@ class DiagnosticRepository(
                 UpdateTrack.DTC_DB -> {
                     if (prevFile != null && prevFile.exists()) lookupDb.installVerifiedDatabase(prevFile)
                     else lookupDb.revertToBundled()
+                    invalidatePidRegistry()
                 }
                 UpdateTrack.COMPATIBILITY_CATALOG -> {
                     catalogManager.rollback()
@@ -506,10 +538,16 @@ class DiagnosticRepository(
         return deletedSessions
     }
 
+    internal val ioScope: CoroutineScope get() = scope
+
     init {
         scope.launch(initErrorHandler) {
             recoverOrphanSessions()
-            _pidRegistry.value = lookupDb.allPids()
+            val pids = lookupDb.allPids()
+            pidIndex = pids.associateBy { it.mode to it.pid }
+            _pidRegistry.value = pids
+            _catalogStatus.value = catalogManager.status()
+            dtcSearchCache.preload()
         }
         // Keep a current snapshot of settings for synchronous use in protocol code.
         scope.launch(initErrorHandler) {
@@ -927,9 +965,22 @@ class DiagnosticRepository(
         closeActiveSessionInDb(status = endStatus, reason = endReason)
     }
 
+    fun invalidatePidRegistry() {
+        pidIndex = emptyMap()
+        _pidRegistry.value = emptyList()
+    }
+
+    suspend fun reloadPidRegistry(): List<PidDefinition> {
+        invalidatePidRegistry()
+        return ensureRegistryLoaded()
+    }
+
     private suspend fun ensureRegistryLoaded(): List<PidDefinition> =
         _pidRegistry.value.ifEmpty {
-            runCatching { lookupDb.allPids() }.getOrDefault(emptyList()).also { _pidRegistry.value = it }
+            runCatching { lookupDb.allPids() }.getOrDefault(emptyList()).also { pids ->
+                pidIndex = pids.associateBy { it.mode to it.pid }
+                _pidRegistry.value = pids
+            }
         }
 
     // ---------------------------------------------------------------------
@@ -937,7 +988,8 @@ class DiagnosticRepository(
     // ---------------------------------------------------------------------
 
     suspend fun readPid(pid: Int, mode: Int = 1): PidResult {
-        val def = ensureRegistryLoaded().firstOrNull { it.mode == mode && it.pid == pid }
+        ensureRegistryLoaded()
+        val def = findPidDef(mode, pid)
             ?: return PidResult.Error(mode, pid, "NODB", "PID отсутствует в базе")
         val o = obd ?: return PidResult.Error(mode, pid, "OFFLINE", "Нет подключения")
         return o.readPid(def, timeoutMs = (settingsCache.cmdTimeoutSec * 1000).toLong())
@@ -978,7 +1030,7 @@ class DiagnosticRepository(
         val defs = ensureRegistryLoaded()
         val entities = snapshot.values.map { ok ->
             val r = ok.reading
-            val def = defs.firstOrNull { it.mode == r.mode && it.pid == r.pid }
+            val def = findPidDef(r.mode, r.pid) ?: defs.firstOrNull { it.mode == r.mode && it.pid == r.pid }
             val valText = when {
                 r.value != null -> if (r.value == r.value.toLong().toDouble()) "%d".format(r.value.toLong()) else "%.2f".format(r.value)
                 !r.text.isNullOrBlank() -> r.text
@@ -1646,7 +1698,19 @@ class DiagnosticRepository(
             lastNote = null,
             lastResponseAtMs = System.currentTimeMillis(),
         )
-        ingestTelemetryStreams()
+        ingestTelemetryStreams(forceChartTick = true)
+    }
+
+    private suspend fun publishLiveBatch(batch: Map<Int, PidResult.Ok>) {
+        if (batch.isEmpty()) return
+        _liveData.value = _liveData.value + batch
+        _pipelineStatus.value = _pipelineStatus.value.copy(
+            ecuResponding = true,
+            dataReceived = true,
+            lastNote = null,
+            lastResponseAtMs = System.currentTimeMillis(),
+        )
+        ingestTelemetryStreams(forceChartTick = false)
     }
 
     /** Reads the Home quick-dashboard PIDs once (+ ATRV fallback) and autosaves immediately. */
@@ -1740,12 +1804,16 @@ class DiagnosticRepository(
         }
         activePollingPids = pids
         _isPolling.value = true
-        val interval = settingsCache.refreshMs.toLong()
+        val baseInterval = settingsCache.refreshMs.toLong().coerceAtLeast(100L)
         val registrySnapshot = ensureRegistryLoaded()
-        val defs = registrySnapshot.filter { it.mode == 1 && pids.contains(it.pid) }
+        val pidSet = pids.toHashSet()
+        val defs = registrySnapshot.filter { it.mode == 1 && it.pid in pidSet }
+        val fastPidsCount = defs.count { it.pid !in SLOW_POLL_PIDS }
         lateinit var job: Job
         job = scope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
             var consecutiveFailures = 0
+            var cycleIndex = 0L
+            val cycleBatch = LinkedHashMap<Int, PidResult.Ok>(defs.size)
             try {
                 while (isActive) {
                     if (!isConnectedNow) {
@@ -1755,15 +1823,18 @@ class DiagnosticRepository(
                     }
                     val t0 = System.currentTimeMillis()
                     val knownSupported = _supportedPids.value.orEmpty()
+                    val pollSlowThisCycle = cycleIndex == 0L || fastPidsCount == 0 || (cycleIndex % SLOW_POLL_STRIDE == 0L)
+                    cycleBatch.clear()
+                    val timeoutMs = (settingsCache.cmdTimeoutSec * 1000).toLong()
                     for (def in defs) {
                         if (!isActive || !isConnectedNow) break
                         if (def.pid in _unsupportedPids.value) continue
+                        if (!pollSlowThisCycle && def.pid in SLOW_POLL_PIDS) continue
                         val o = obd ?: break
-                        when (val r = o.readPid(def, timeoutMs = (settingsCache.cmdTimeoutSec * 1000).toLong())) {
+                        when (val r = o.readPid(def, timeoutMs = timeoutMs)) {
                             is PidResult.Ok -> {
                                 consecutiveFailures = 0
-                                publishLiveReading(def.pid, r)
-                                persistLiveSensorsNow(force = false)
+                                cycleBatch[def.pid] = r
                             }
                             is PidResult.Unsupported -> {
                                 if (def.pid !in knownSupported) {
@@ -1778,6 +1849,10 @@ class DiagnosticRepository(
                             }
                         }
                         if (consecutiveFailures >= 2) {
+                            if (cycleBatch.isNotEmpty()) {
+                                publishLiveBatch(cycleBatch)
+                                cycleBatch.clear()
+                            }
                             val stillAlive = verifyEcuAndAdapterLiveness()
                             if (!stillAlive) {
                                 return@launch
@@ -1785,8 +1860,17 @@ class DiagnosticRepository(
                             consecutiveFailures = 0
                         }
                     }
+                    if (cycleBatch.isNotEmpty()) {
+                        publishLiveBatch(cycleBatch)
+                        persistLiveSensorsNow(force = false)
+                        cycleBatch.clear()
+                    }
+                    cycleIndex++
                     val elapsed = System.currentTimeMillis() - t0
-                    delay(maxOf(0, interval - elapsed))
+                    val bgSlowdown = !uiForeground && !tripRecorder.state.value.active
+                    val targetInterval = if (bgSlowdown) maxOf(baseInterval * 3L, 2500L) else baseInterval
+                    val minPauseMs = if (elapsed > targetInterval) minOf(250L, elapsed / 4L).coerceAtLeast(40L) else 40L
+                    delay(maxOf(minPauseMs, targetInterval - elapsed))
                 }
             } finally {
                 if (pollingJob === job) {
@@ -1872,12 +1956,16 @@ class DiagnosticRepository(
         return st
     }
 
-    suspend fun ingestTelemetryStreams() {
+    suspend fun ingestTelemetryStreams(forceChartTick: Boolean = false) {
         val live = _liveData.value
         val unsup = _unsupportedPids.value
         val reg = _pidRegistry.value
         chartBuffer.ingestLiveSnapshot(live, unsup, reg)
-        _chartTick.value = System.currentTimeMillis()
+        val now = System.currentTimeMillis()
+        if (forceChartTick || now - lastChartTickEmitMs >= 200L) {
+            lastChartTickEmitMs = now
+            _chartTick.value = now
+        }
         tripRecorder.ingestSnapshot(live, unsup, reg)
     }
 }

@@ -14,7 +14,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -23,6 +22,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.obd2.app.core.transport.TransportState
 import com.obd2.app.ui.ObdViewModel
 import com.obd2.app.ui.theme.Green
@@ -32,9 +32,9 @@ import kotlinx.coroutines.launch
 @Composable
 fun AdapterScreen(vm: ObdViewModel) {
     val uiScope = rememberCoroutineScope()
-    val elmInfo by vm.elmInfo.collectAsState()
-    val stats by vm.elmStats.collectAsState()
-    val connection by vm.connection.collectAsState()
+    val elmInfo by vm.elmInfo.collectAsStateWithLifecycle()
+    val stats by vm.elmStats.collectAsStateWithLifecycle()
+    val connection by vm.connection.collectAsStateWithLifecycle()
     var dbMeta by remember { mutableStateOf<com.obd2.app.core.db.ObdLookupDb.DbMeta?>(null) }
     var integrity by remember { mutableStateOf<String?>(null) }
     var showFullLog by remember { mutableStateOf(false) }

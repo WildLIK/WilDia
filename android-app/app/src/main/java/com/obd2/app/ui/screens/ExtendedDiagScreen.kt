@@ -17,7 +17,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -26,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.obd2.app.core.repo.DiagnosticRepository
 import com.obd2.app.core.universal.EcuStatus
 import com.obd2.app.core.universal.VehicleDiagnosticProfileRegistry
@@ -36,15 +36,15 @@ import com.obd2.app.ui.theme.TextDim
 
 @Composable
 fun ExtendedDiagScreen(vm: ObdViewModel) {
-    val connection by vm.connection.collectAsState()
-    val running by vm.extendedDiagRunning.collectAsState()
-    val progress by vm.extendedDiagProgress.collectAsState()
-    val report by vm.extendedDiagReport.collectAsState()
-    val settings by vm.settingsFlow.collectAsState()
-    val catalogStatus by vm.catalogStatus.collectAsState()
-    val profiles by vm.profiles.collectAsState()
-    val activeProfileId by vm.activeProfileId.collectAsState()
-    val vinTrace by vm.vinIdentificationResult.collectAsState()
+    val connection by vm.connection.collectAsStateWithLifecycle()
+    val running by vm.extendedDiagRunning.collectAsStateWithLifecycle()
+    val progress by vm.extendedDiagProgress.collectAsStateWithLifecycle()
+    val report by vm.extendedDiagReport.collectAsStateWithLifecycle()
+    val settings by vm.settingsFlow.collectAsStateWithLifecycle()
+    val catalogStatus by vm.catalogStatus.collectAsStateWithLifecycle()
+    val profiles by vm.profiles.collectAsStateWithLifecycle()
+    val activeProfileId by vm.activeProfileId.collectAsStateWithLifecycle()
+    val vinTrace by vm.vinIdentificationResult.collectAsStateWithLifecycle()
     val clipboard = LocalClipboardManager.current
 
     val activeCar = profiles.firstOrNull { it.id == activeProfileId }

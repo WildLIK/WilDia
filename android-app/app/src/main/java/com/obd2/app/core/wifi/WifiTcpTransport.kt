@@ -121,11 +121,18 @@ object WifiEndpointProber {
             candidates["$h:$customPort"] = WifiObdEndpoint(h, customPort, "$h:$customPort (вручную)")
         }
         status.gatewayIp?.let { gw ->
-            candidates.putIfAbsent("$gw:35000", WifiObdEndpoint(gw, 35000, "$gw:35000 (шлюз Wi-Fi)"))
-            candidates.putIfAbsent("$gw:23", WifiObdEndpoint(gw, 23, "$gw:23 (шлюз Telnet)"))
+            if (!candidates.containsKey("$gw:35000")) {
+                candidates["$gw:35000"] = WifiObdEndpoint(gw, 35000, "$gw:35000 (шлюз Wi-Fi)")
+            }
+            if (!candidates.containsKey("$gw:23")) {
+                candidates["$gw:23"] = WifiObdEndpoint(gw, 23, "$gw:23 (шлюз Telnet)")
+            }
         }
         for (preset in WifiObdPresets.common) {
-            candidates.putIfAbsent("${preset.host}:${preset.port}", preset)
+            val k = "${preset.host}:${preset.port}"
+            if (!candidates.containsKey(k)) {
+                candidates[k] = preset
+            }
         }
 
         val reachable = mutableListOf<WifiObdEndpoint>()
@@ -188,6 +195,7 @@ class WifiTcpTransport(
     @Volatile private var input: InputStream? = null
     @Volatile private var output: OutputStream? = null
     private var readerJob: Job? = null
+    private var reconnectJob: Job? = null
 
     override fun isConnected(): Boolean =
         _state.value is TransportState.Connected && socket?.isClosed == false && output != null
@@ -258,7 +266,8 @@ class WifiTcpTransport(
                 if (!userClosed.get() && isActive) {
                     log.log(RawLog.Dir.ERROR, "[WIFI] read error: ${e.message}")
                     closeQuietly()
-                    handleUnexpectedDrop(e.message ?: "Разрыв Wi-Fi TCP соединения")
+                    val reason = e.message ?: "Разрыв Wi-Fi TCP соединения"
+                    reconnectJob = scope.launch { handleUnexpectedDrop(reason) }
                 }
             }
         }
@@ -298,6 +307,9 @@ class WifiTcpTransport(
 
     override suspend fun disconnect() {
         userClosed.set(true)
+        reconnecting.set(false)
+        reconnectJob?.cancel()
+        reconnectJob = null
         readerJob?.cancel()
         readerJob = null
         closeQuietly()

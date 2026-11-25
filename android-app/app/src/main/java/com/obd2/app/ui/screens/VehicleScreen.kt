@@ -21,7 +21,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -31,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.obd2.app.core.repo.VehicleProfile
 import com.obd2.app.ui.ObdViewModel
 import com.obd2.app.ui.theme.Amber
@@ -46,12 +46,12 @@ import com.obd2.app.ui.theme.TextDim
  */
 @Composable
 fun VehicleScreen(vm: ObdViewModel) {
-    val profiles by vm.settings.profilesFlow.collectAsState(initial = emptyList())
-    val activeId by vm.settings.activeProfileIdFlow.collectAsState(initial = "")
-    val connection by vm.connection.collectAsState()
-    val sessionVehicle by vm.sessionVehicle.collectAsState()
-    val vinTrace by vm.vinIdentificationResult.collectAsState()
-    val settings by vm.settingsFlow.collectAsState()
+    val profiles by vm.settings.profilesFlow.collectAsStateWithLifecycle(initialValue = emptyList())
+    val activeId by vm.settings.activeProfileIdFlow.collectAsStateWithLifecycle(initialValue = "")
+    val connection by vm.connection.collectAsStateWithLifecycle()
+    val sessionVehicle by vm.sessionVehicle.collectAsStateWithLifecycle()
+    val vinTrace by vm.vinIdentificationResult.collectAsStateWithLifecycle()
+    val settings by vm.settingsFlow.collectAsStateWithLifecycle()
     val clipboard = LocalClipboardManager.current
 
     var message by remember { mutableStateOf<String?>(null) }

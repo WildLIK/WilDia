@@ -18,7 +18,6 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -27,6 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.obd2.app.Screen
 import com.obd2.app.core.repo.SettingsRepository
@@ -39,15 +39,15 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun SettingsScreen(vm: ObdViewModel, nav: NavHostController? = null) {
-    val settings by vm.settingsFlow.collectAsState()
+    val settings by vm.settingsFlow.collectAsStateWithLifecycle()
 
     var dbMeta by remember { mutableStateOf<com.obd2.app.core.db.ObdLookupDb.DbMeta?>(null) }
     var importError by remember { mutableStateOf<String?>(null) }
     var rawCmd by remember { mutableStateOf("") }
     var devNotice by remember { mutableStateOf<String?>(null) }
     var confirmClearDemo by remember { mutableStateOf(false) }
-    val rawRead by vm.rawRead.collectAsState()
-    val connection by vm.connection.collectAsState()
+    val rawRead by vm.rawRead.collectAsStateWithLifecycle()
+    val connection by vm.connection.collectAsStateWithLifecycle()
     val connectedNow = connection is com.obd2.app.core.repo.DiagnosticRepository.ConnectionState.Connected
     val demoRunning = (connection as? com.obd2.app.core.repo.DiagnosticRepository.ConnectionState.Connected)?.demo == true
     val uiScope = rememberCoroutineScope()
@@ -57,6 +57,9 @@ fun SettingsScreen(vm: ObdViewModel, nav: NavHostController? = null) {
         if (uri != null) {
             uiScope.launch {
                 val err = vm.repo.lookupDb.importDatabase(uri)
+                if (err == null) {
+                    vm.repo.reloadPidRegistry()
+                }
                 importError = err
                 dbMeta = vm.repo.lookupDb.meta()
             }

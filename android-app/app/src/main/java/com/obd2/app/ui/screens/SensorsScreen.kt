@@ -16,15 +16,17 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.obd2.app.Screen
+import com.obd2.app.core.obd.PidDefinition
+import com.obd2.app.core.obd.PidReading
 import com.obd2.app.core.repo.DiagnosticRepository
 import com.obd2.app.ui.ObdViewModel
 import com.obd2.app.ui.theme.Amber
@@ -35,6 +37,7 @@ import com.obd2.app.ui.theme.TextDim
 private val dashboardPids = listOf(
     0x0C, 0x0D, 0x05, 0x04, 0x42, 0x0F, 0x2F, 0x11, 0x10, 0x1F, 0x5C, 0x06, 0x07, 0x46, 0x0B, 0x0E,
 )
+private val dashboardPidRows = dashboardPids.chunked(2)
 
 private val pidTitles = mapOf(
     0x0C to "Обороты двигателя", 0x0D to "Скорость", 0x05 to "Темп. охлаждающей жидкости",
@@ -47,15 +50,18 @@ private val pidTitles = mapOf(
 
 @Composable
 fun SensorsScreen(vm: ObdViewModel, nav: NavHostController? = null) {
-    val connection by vm.connection.collectAsState()
-    val pipeline by vm.pipelineStatus.collectAsState()
-    val polling by vm.isPolling.collectAsState()
-    val live by vm.liveData.collectAsState()
-    val unsupportedPids by vm.unsupportedPids.collectAsState()
-    val elmInfo by vm.elmInfo.collectAsState()
-    val settings by vm.settingsFlow.collectAsState()
-    val registry by vm.pidRegistry.collectAsState()
+    val connection by vm.connection.collectAsStateWithLifecycle()
+    val pipeline by vm.pipelineStatus.collectAsStateWithLifecycle()
+    val polling by vm.isPolling.collectAsStateWithLifecycle()
+    val live by vm.liveData.collectAsStateWithLifecycle()
+    val unsupportedPids by vm.unsupportedPids.collectAsStateWithLifecycle()
+    val elmInfo by vm.elmInfo.collectAsStateWithLifecycle()
+    val settings by vm.settingsFlow.collectAsStateWithLifecycle()
+    val registry by vm.pidRegistry.collectAsStateWithLifecycle()
 
+    val pidDefByPid = remember(registry) {
+        registry.filter { it.mode == 1 }.associateBy { it.pid }
+    }
     val connected = connection is DiagnosticRepository.ConnectionState.Connected
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(connected, polling) {
@@ -121,67 +127,92 @@ fun SensorsScreen(vm: ObdViewModel, nav: NavHostController? = null) {
         )
 
         val imperial = settings.units == SettingsRepositoryUnits.IMPERIAL
-        dashboardPids.chunked(2).forEach { rowPids ->
+        dashboardPidRows.forEach { rowPids ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 rowPids.forEach { pid ->
-                    val def = registry.firstOrNull { it.mode == 1 && it.pid == pid }
-                    val title = pidTitles[pid] ?: def?.displayName ?: "PID %02X".format(pid)
-                    val reading = live[pid]?.reading
-                    val atrvFallback = if (pid == 0x42 && reading?.value == null && connected) elmInfo?.voltage else null
-                    val freshness = DiagnosticRepository.evaluateSensorFreshness(
-                        reading = reading,
-                        isConnected = connected,
+                    SensorPidTile(
+                        pid = pid,
+                        def = pidDefByPid[pid],
+                        reading = live[pid]?.reading,
+                        atrvVoltage = if (pid == 0x42) elmInfo?.voltage else null,
+                        connected = connected,
                         isUnsupported = pid in unsupportedPids,
+                        imperial = imperial,
                         nowMs = nowMs,
                         staleThresholdMs = staleThresholdMs,
+                        modifier = Modifier.weight(1f),
                     )
-                    val value = when {
-                        atrvFallback != null -> "%.1f".format(atrvFallback)
-                        freshness == DiagnosticRepository.SensorFreshness.UNSUPPORTED -> "Не поддерживается"
-                        !connected -> "Нет связи"
-                        reading?.value != null -> {
-                            var v = reading.value
-                            if (imperial) {
-                                when (pid) {
-                                    0x0D -> v *= 0.621371
-                                    0x05, 0x0F, 0x46, 0x5C -> v = v * 9.0 / 5.0 + 32.0
-                                }
-                            }
-                            if (v == v.toLong().toDouble()) "%d".format(v.toLong()) else "%.1f".format(v)
-                        }
-                        reading?.text != null -> reading.text.take(14)
-                        else -> "—"
-                    }
-                    val baseUnit = when {
-                        atrvFallback != null -> "В (ATRV)"
-                        !connected || freshness == DiagnosticRepository.SensorFreshness.UNSUPPORTED -> null
-                        reading?.value != null -> when {
-                            imperial && pid == 0x0D -> "mph"
-                            imperial && pid in setOf(0x05, 0x0F, 0x46, 0x5C) -> "°F"
-                            else -> reading.unit ?: def?.unit
-                        }
-                        else -> null
-                    }
-                    val ageSec = if (reading != null) ((nowMs - reading.timestampMs) / 1000L).coerceAtLeast(0L) else 0L
-                    val unit2 = when {
-                        freshness == DiagnosticRepository.SensorFreshness.STALE && baseUnit != null -> "$baseUnit · устарело (${ageSec}с)"
-                        freshness == DiagnosticRepository.SensorFreshness.STALE -> "Устарело (${ageSec}с)"
-                        else -> baseUnit
-                    }
-                    val accent = when {
-                        freshness == DiagnosticRepository.SensorFreshness.STALE -> Amber
-                        freshness == DiagnosticRepository.SensorFreshness.NO_CONNECTION -> TextDim
-                        freshness == DiagnosticRepository.SensorFreshness.UNSUPPORTED -> TextDim
-                        pid == 0x42 -> Green
-                        pid == 0x05 || pid == 0x5C -> Amber
-                        else -> com.obd2.app.ui.theme.Accent
-                    }
-                    ValueTile(title, value, unit2, Modifier.weight(1f), accent)
                 }
                 if (rowPids.size == 1) androidx.compose.foundation.layout.Box(Modifier.weight(1f)) {}
             }
         }
     }
+}
+
+@Composable
+private fun SensorPidTile(
+    pid: Int,
+    def: PidDefinition?,
+    reading: PidReading?,
+    atrvVoltage: Float?,
+    connected: Boolean,
+    isUnsupported: Boolean,
+    imperial: Boolean,
+    nowMs: Long,
+    staleThresholdMs: Long,
+    modifier: Modifier = Modifier,
+) {
+    val title = pidTitles[pid] ?: def?.displayName ?: "PID %02X".format(pid)
+    val atrvFallback = if (pid == 0x42 && reading?.value == null && connected) atrvVoltage else null
+    val freshness = DiagnosticRepository.evaluateSensorFreshness(
+        reading = reading,
+        isConnected = connected,
+        isUnsupported = isUnsupported,
+        nowMs = nowMs,
+        staleThresholdMs = staleThresholdMs,
+    )
+    val value = when {
+        atrvFallback != null -> "%.1f".format(atrvFallback)
+        freshness == DiagnosticRepository.SensorFreshness.UNSUPPORTED -> "Не поддерживается"
+        !connected -> "Нет связи"
+        reading?.value != null -> {
+            var v = reading.value
+            if (imperial) {
+                when (pid) {
+                    0x0D -> v *= 0.621371
+                    0x05, 0x0F, 0x46, 0x5C -> v = v * 9.0 / 5.0 + 32.0
+                }
+            }
+            if (v == v.toLong().toDouble()) "%d".format(v.toLong()) else "%.1f".format(v)
+        }
+        reading?.text != null -> reading.text.take(14)
+        else -> "—"
+    }
+    val baseUnit = when {
+        atrvFallback != null -> "В (ATRV)"
+        !connected || freshness == DiagnosticRepository.SensorFreshness.UNSUPPORTED -> null
+        reading?.value != null -> when {
+            imperial && pid == 0x0D -> "mph"
+            imperial && pid in setOf(0x05, 0x0F, 0x46, 0x5C) -> "°F"
+            else -> reading.unit ?: def?.unit
+        }
+        else -> null
+    }
+    val ageSec = if (reading != null) ((nowMs - reading.timestampMs) / 1000L).coerceAtLeast(0L) else 0L
+    val unit2 = when {
+        freshness == DiagnosticRepository.SensorFreshness.STALE && baseUnit != null -> "$baseUnit · устарело (${ageSec}с)"
+        freshness == DiagnosticRepository.SensorFreshness.STALE -> "Устарело (${ageSec}с)"
+        else -> baseUnit
+    }
+    val accent = when {
+        freshness == DiagnosticRepository.SensorFreshness.STALE -> Amber
+        freshness == DiagnosticRepository.SensorFreshness.NO_CONNECTION -> TextDim
+        freshness == DiagnosticRepository.SensorFreshness.UNSUPPORTED -> TextDim
+        pid == 0x42 -> Green
+        pid == 0x05 || pid == 0x5C -> Amber
+        else -> com.obd2.app.ui.theme.Accent
+    }
+    ValueTile(title, value, unit2, modifier, accent)
 }
 
 // Alias to keep the import surface small

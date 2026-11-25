@@ -135,7 +135,7 @@ jobs:
               "apkUrl": apk_url,
               "sizeBytes": int(size),
               "sha256": sha,
-              "minAndroidSdk": 26,
+              "minAndroidSdk": 23,
               "releasedAt": released_at,
           }
           with open(out_path, "w", encoding="utf-8") as f:

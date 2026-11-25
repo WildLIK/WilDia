@@ -16,11 +16,12 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.obd2.app.core.updates.UpdateTrack
 import com.obd2.app.ui.ObdViewModel
 import com.obd2.app.ui.theme.Amber
@@ -32,11 +33,11 @@ import java.util.Locale
 
 @Composable
 fun UpdatesScreen(vm: ObdViewModel) {
-    val settings by vm.settingsFlow.collectAsState()
-    val trackStates by vm.dbTrackStates.collectAsState()
-    val history by vm.dbUpdateHistory.collectAsState()
-    val message by vm.updateCheckMessage.collectAsState()
-    val df = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault())
+    val settings by vm.settingsFlow.collectAsStateWithLifecycle()
+    val trackStates by vm.dbTrackStates.collectAsStateWithLifecycle()
+    val history by vm.dbUpdateHistory.collectAsStateWithLifecycle()
+    val message by vm.updateCheckMessage.collectAsStateWithLifecycle()
+    val df = remember { SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()) }
 
     Column(
         Modifier

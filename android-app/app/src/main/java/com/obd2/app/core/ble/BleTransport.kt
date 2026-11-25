@@ -65,9 +65,12 @@ class BleTransport(
     private val userDisconnected = AtomicBoolean(false)
     private val reconnecting = AtomicBoolean(false)
     private var reconnectJob: kotlinx.coroutines.Job? = null
+    private var mtuJob: kotlinx.coroutines.Job? = null
+    private var discoverFallbackJob: kotlinx.coroutines.Job? = null
+    private var writeWorkerJob: kotlinx.coroutines.Job? = null
     private val connectOutcomes = Channel<Boolean>(Channel.CONFLATED)
     private val writeQueue = Channel<ByteArray>(Channel.UNLIMITED)
-    private var writeWorkerStarted = false
+    @Volatile private var writeWorkerStarted = false
     private var lastSnapshot: GattSnapshot? = null
     private val discoverRequested = AtomicBoolean(false)
     private var connectRequestedAt: Long = 0
@@ -126,7 +129,8 @@ class BleTransport(
                     // Fresh physical connection: MTU must be (re)negotiated for
                     // every GATT instance — Android resets it to 23 on reconnect.
                     discoverRequested.set(false)
-                    scope.launch {
+                    mtuJob?.cancel()
+                    mtuJob = scope.launch {
                         delay(600)
                         if (!safePermissions()) {
                             log.log(RawLog.Dir.ERROR, "[BLE] CONNECT permission lost mid-connect")
@@ -143,7 +147,8 @@ class BleTransport(
                             }
                     }
                     // Fallback: proceed even if onMtuChanged never arrives.
-                    scope.launch {
+                    discoverFallbackJob?.cancel()
+                    discoverFallbackJob = scope.launch {
                         delay(2000)
                         if (discoverRequested.compareAndSet(false, true)) {
                             log.log(RawLog.Dir.INFO, "[BLE] MTU callback missing — fallback to discoverServices")
@@ -170,6 +175,11 @@ class BleTransport(
                     if (!userDisconnected.get()) {
                         diag?.disconnected(GattInspector.gattStatusText(status) + ": " + (lastError ?: "без деталей"))
                     }
+                    mtuJob?.cancel()
+                    mtuJob = null
+                    discoverFallbackJob?.cancel()
+                    discoverFallbackJob = null
+                    stopWriteWorker()
                     drainQueuesOnDisconnect()
                     runCatching { g.close() }
                     if (gatt === g) gatt = null
@@ -539,6 +549,11 @@ class BleTransport(
         reconnecting.set(false)
         reconnectJob?.cancel()
         reconnectJob = null
+        mtuJob?.cancel()
+        mtuJob = null
+        discoverFallbackJob?.cancel()
+        discoverFallbackJob = null
+        stopWriteWorker()
         drainQueuesOnDisconnect()
         connectOutcomes.trySend(false)
         log.log(RawLog.Dir.INFO, "[BLE] disconnect() requested by user")
@@ -550,11 +565,19 @@ class BleTransport(
         trackState(TransportState.Disconnected)
     }
 
+    private fun stopWriteWorker() {
+        writeWorkerStarted = false
+        writeWorkerJob?.cancel()
+        writeWorkerJob = null
+    }
+
     private fun startWriteWorker() {
-        if (writeWorkerStarted) return
+        if (writeWorkerStarted && writeWorkerJob?.isActive == true) return
         writeWorkerStarted = true
-        scope.launch {
-            for (data in writeQueue) {
+        writeWorkerJob?.cancel()
+        writeWorkerJob = scope.launch {
+            try {
+                for (data in writeQueue) {
                 val g = gatt ?: continue
                 val ch = writeChar ?: continue
                 if (!safePermissions()) {
@@ -605,6 +628,9 @@ class BleTransport(
                         }.onFailure { log.log(RawLog.Dir.ERROR, "[BLE] write threw: ${it.message}") }
                     }
                 }
+                }
+            } finally {
+                writeWorkerStarted = false
             }
         }
     }

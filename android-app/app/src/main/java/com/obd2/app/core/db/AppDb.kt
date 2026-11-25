@@ -51,7 +51,13 @@ object VehicleIdentitySource {
     }
 }
 
-@Entity(tableName = "sessions")
+@Entity(
+    tableName = "sessions",
+    indices = [
+        Index(value = ["startedAtMs"]),
+        Index(value = ["status"]),
+    ],
+)
 data class SessionEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val startedAtMs: Long,
@@ -89,7 +95,13 @@ data class SessionEntity(
     }
 }
 
-@Entity(tableName = "dtc_records")
+@Entity(
+    tableName = "dtc_records",
+    indices = [
+        Index(value = ["sessionId", "mode"]),
+        Index(value = ["timestampMs"]),
+    ],
+)
 data class DtcRecordEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val sessionId: Long,
@@ -447,7 +459,7 @@ interface DtcScanRunDao {
         TripSampleEntity::class,
         DtcScanRunEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = false,
 )
 abstract class AppDb : RoomDatabase() {
@@ -590,6 +602,24 @@ abstract class AppDb : RoomDatabase() {
             }
         }
 
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_sessions_startedAtMs ON sessions(startedAtMs)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_sessions_status ON sessions(status)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_dtc_records_sessionId_mode ON dtc_records(sessionId, mode)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_dtc_records_timestampMs ON dtc_records(timestampMs)")
+            }
+        }
+
+        val ALL_MIGRATIONS = arrayOf(
+            MIGRATION_1_2,
+            MIGRATION_2_3,
+            MIGRATION_3_4,
+            MIGRATION_4_5,
+            MIGRATION_5_6,
+            MIGRATION_6_7,
+        )
+
         /**
          * One AppDb per application context. In production the Application is a
          * process-wide singleton, so this yields exactly one DB; in Robolectric
@@ -604,7 +634,7 @@ abstract class AppDb : RoomDatabase() {
             val app = context.applicationContext
             return instances.getOrPut(app) {
                 Room.databaseBuilder(app, AppDb::class.java, "obd_app.db")
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                    .addMigrations(*ALL_MIGRATIONS)
                     .build()
             }
         }
